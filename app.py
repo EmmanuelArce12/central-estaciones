@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 # --- CONFIGURACIÓN ---
 db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
-if db_url.startswith("postgres://"):
+if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
@@ -29,8 +29,12 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
+    
+    # Relaciones
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False)
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False)
+    
+    # Estado Conexión
     status_conexion = db.Column(db.String(20), default='pendiente')
     last_check = db.Column(db.DateTime)
 
@@ -51,7 +55,7 @@ class Cliente(db.Model):
 class CredencialVox(db.Model):
     __tablename__ = 'credenciales_vox'
     id = db.Column(db.Integer, primary_key=True)
-    vox_ip = db.Column(db.String(50)) # NUEVO: La IP se guarda aquí
+    vox_ip = db.Column(db.String(50))
     vox_usuario = db.Column(db.String(50))
     vox_clave = db.Column(db.String(50))
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
@@ -210,37 +214,28 @@ def config_vox():
         cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
         if not cred: cred = CredencialVox(user_id=current_user.id)
         
-        cred.vox_ip = u_ip # Guardamos la IP
+        cred.vox_ip = u_ip
         cred.vox_usuario = u_vox
         cred.vox_clave = p_vox
-        
         current_user.status_conexion = 'pendiente' 
         db.session.add(cred)
         db.session.commit()
-        mensaje = "✅ Datos guardados. Esperando prueba de conexión..."
+        mensaje = "✅ Datos guardados."
 
     cred = current_user.credenciales_vox
     val_ip = cred.vox_ip if cred else "10.6.235.229"
     val_u = cred.vox_usuario if cred else ""
     val_p = cred.vox_clave if cred else ""
     return f"""
-    <style>body{{font-family:sans-serif;padding:40px;text-align:center;background:#f4f7f6}}form{{background:white;padding:30px;display:inline-block;border-radius:10px;box-shadow:0 5px 15px rgba(0,0,0,0.1)}}input{{display:block;margin:15px auto;padding:10px;width:300px;border:1px solid #ccc;border-radius:5px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px;cursor:pointer}}label{{display:block;text-align:left;margin-left:15px;font-weight:bold;font-size:0.9rem;color:#555}}</style>
-    <h1>📡 Datos de Conexión VOX</h1>
-    <p>Estos datos serán usados por el script instalado en la PC de la estación.</p>
+    <style>body{{font-family:sans-serif;padding:40px;text-align:center;background:#f4f7f6}}form{{background:white;padding:30px;display:inline-block;border-radius:10px}}input{{display:block;margin:15px auto;padding:10px;width:300px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px;cursor:pointer}}label{{display:block;text-align:left;margin-left:15px}}</style>
+    <h1>📡 Datos VOX</h1>
     <form method="POST">
-        <label>IP del Servidor VOX:</label>
-        <input type="text" name="vox_ip" value="{val_ip}" placeholder="Ej: 10.6.235.229" required>
-        
-        <label>Usuario VOX:</label>
-        <input type="text" name="vox_user" value="{val_u}" placeholder="Usuario" required>
-        
-        <label>Contraseña VOX:</label>
-        <input type="password" name="vox_pass" value="{val_p}" placeholder="Contraseña" required>
-        
-        <button type="submit">Guardar y Probar</button>
+        <label>IP Servidor:</label><input type="text" name="vox_ip" value="{val_ip}" required>
+        <label>Usuario:</label><input type="text" name="vox_user" value="{val_u}" required>
+        <label>Clave:</label><input type="password" name="vox_pass" value="{val_p}" required>
+        <button type="submit">Guardar</button>
     </form>
-    <p style="color:green;font-weight:bold">{mensaje}</p>
-    <br><a href="/">Volver al Panel</a>
+    <p style="color:green">{mensaje}</p><br><a href="/">Volver</a>
     """
 
 @app.route('/estacion/ver-reportes')
@@ -255,7 +250,6 @@ def api_credenciales():
     u_web = request.json.get('usuario_web')
     user = User.query.filter_by(username=u_web).first()
     if user and user.credenciales_vox:
-        # Devuelve IP, Usuario y Clave
         return jsonify({
             "vox_ip": user.credenciales_vox.vox_ip,
             "vox_usuario": user.credenciales_vox.vox_usuario, 
@@ -273,7 +267,7 @@ def api_estado():
         user.status_conexion = status
         user.last_check = datetime.now()
         db.session.commit()
-        return jsonify({"msg": "Estado actualizado"}), 200
+        return jsonify({"msg": "OK"}), 200
     return jsonify({"error": "User not found"}), 404
 
 @app.route('/api/reportar', methods=['POST'])
@@ -286,6 +280,7 @@ def recibir_reporte():
         nid = nuevo.get('id_interno')
         if Reporte.query.filter_by(id_interno=nid, user_id=user.id).first():
             return jsonify({"status": "ignorado"}), 200
+        
         fecha_str = nuevo.get('fecha')
         f_op, turno, dt_cierre = procesar_fecha_turno(fecha_str)
         rep = Reporte(
@@ -298,14 +293,22 @@ def recibir_reporte():
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
+# --- INICIALIZADOR SEGURO ---
 def auto_setup():
-    with app.app_context():
-        db.create_all()
-        if not User.query.filter_by(username='admin').first():
-            admin = User(username='admin', role='superadmin')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            db.session.commit()
+    # Bloque Try-Except para evitar que el deploy falle si la DB no está lista
+    try:
+        with app.app_context():
+            db.create_all()
+            if not User.query.filter_by(username='admin').first():
+                print("⚙️ Setup: Creando Admin...")
+                admin = User(username='admin', role='superadmin')
+                admin.set_password('admin123')
+                db.session.add(admin)
+                db.session.commit()
+                print("✅ Admin creado.")
+    except Exception as e:
+        print(f"⚠️ Advertencia en Setup (Puede requerir reinicio DB): {e}")
+
 auto_setup()
 
 if __name__ == '__main__':
