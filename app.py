@@ -13,7 +13,7 @@ db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 if db_url and db_url.startswith("postgres://"): db_url = db_url.replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'SECRET_KEY_SUPER_SECURE'
+app.config['SECRET_KEY'] = 'SECRET_KEY'
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -28,7 +28,10 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
     api_token = db.Column(db.String(100), unique=True, nullable=True)
+    
+    # ESTADO Y COMANDOS
     status_conexion = db.Column(db.String(20), default='pendiente')
+    comando_pendiente = db.Column(db.String(50), nullable=True) # Ej: 'EXTRAER'
     last_check = db.Column(db.DateTime)
     
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False)
@@ -80,28 +83,7 @@ def procesar_fecha_turno(s):
         return f.strftime("%Y-%m-%d"), t, dt
     except: return None,None,None
 
-# --- API DE ACTIVACIÓN AUTOMÁTICA (NUEVO) ---
-@app.route('/api/activar-estacion', methods=['POST'])
-def activar_estacion():
-    data = request.json
-    u = data.get('username')
-    p = data.get('password')
-    
-    user = User.query.filter_by(username=u).first()
-    
-    if user and user.check_password(p):
-        # Credenciales correctas. ¿Tiene token?
-        if not user.api_token:
-            # Generamos uno nuevo
-            user.api_token = secrets.token_hex(16)
-            db.session.commit()
-        
-        return jsonify({"status": "ok", "api_token": user.api_token}), 200
-    
-    return jsonify({"status": "error", "msg": "Credenciales inválidas"}), 401
-
-# --- RESTO DE RUTAS (SIMPLIFICADAS) ---
-
+# --- RUTAS ---
 @app.route('/')
 def root():
     if current_user.is_authenticated:
@@ -131,7 +113,7 @@ def panel_superadmin():
         u = request.form.get('username'); p = request.form.get('password'); n = request.form.get('nombre'); r = request.form.get('role')
         if User.query.filter_by(username=u).first(): msg = "❌ Existe."
         else:
-            nu = User(username=u, role=r); nu.set_password(p); db.session.add(nu); db.session.commit()
+            nu = User(username=u, role=r, api_token=secrets.token_hex(16)); nu.set_password(p); db.session.add(nu); db.session.commit()
             if r == 'estacion': nc = Cliente(nombre_fantasia=n, user_id=nu.id); db.session.add(nc); db.session.commit()
             msg = "✅ Creado."
     users = User.query.all(); l = ""
@@ -147,9 +129,32 @@ def panel_estacion():
     if current_user.is_superadmin: return redirect(url_for('panel_superadmin'))
     st = current_user.status_conexion
     cls = "ok" if st=='ok' else "err" if st=='error' else ""
-    icon = "✅ Conectado" if st=='ok' else "❌ Error" if st=='error' else "⚪ Pendiente"
-    # Auto-refresh del estado visual
-    return f"""<style>body{{font-family:sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.btn{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005}}.tag{{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}}.ok{{background:#d4edda;color:green}}.err{{background:#f8d7da;color:red}}</style><script>setInterval(()=>{{fetch('/api/check-status').then(r=>r.json()).then(d=>{{if(d.status!=='{st}')location.reload()}})}},5000)</script><div style="max-width:600px;margin:0 auto"><h1>Hola, {current_user.username}</h1><a href="/estacion/config-vox" class="btn">📡 Configurar VOX <span class="tag {cls}">{icon}</span></a><a href="/estacion/ver-reportes" class="btn">📊 Ver Gráficos</a><br><a href="/logout">Salir</a></div>"""
+    icon = "✅ Conectado" if st=='ok' else "❌ Error" if st=='error' else "⚪ Desconectado"
+    
+    # Verificamos si hay comando pendiente
+    btn_extract_text = "⬇️ EXTRAER REPORTE AHORA"
+    btn_extract_state = ""
+    if current_user.comando_pendiente == 'EXTRACT':
+        btn_extract_text = "⏳ Enviando orden a la PC..."
+        btn_extract_state = "disabled style='opacity:0.5;cursor:wait'"
+
+    return f"""
+    <style>body{{font-family:sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.btn{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005}}.tag{{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}}.ok{{background:#d4edda;color:green}}.err{{background:#f8d7da;color:red}}.action-btn{{background:#007bff;color:white;text-align:center;font-weight:bold}}</style>
+    <script>setInterval(()=>{{fetch('/api/check-status').then(r=>r.json()).then(d=>{{if(d.status!=='{st}' || d.cmd===null)location.reload()}})}},3000)</script>
+    <div style="max-width:600px;margin:0 auto">
+        <h1>Hola, {current_user.username}</h1>
+        <p style="color:gray">Estado: <span class="tag {cls}">{icon}</span></p>
+        
+        <a href="/estacion/config-vox" class="btn">⚙️ Configurar Credenciales VOX</a>
+        
+        <form method="POST" action="/api/lanzar-extraccion">
+            <button class="btn action-btn" {btn_extract_state}>{btn_extract_text}</button>
+        </form>
+
+        <a href="/estacion/ver-reportes" class="btn">📊 Ver Gráficos</a>
+        <br><a href="/logout">Salir</a>
+    </div>
+    """
 
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
@@ -162,38 +167,53 @@ def config_vox():
         c.vox_ip = ip; c.vox_usuario = u; c.vox_clave = p
         current_user.status_conexion = 'pendiente'
         db.session.add(c); db.session.commit()
-        msg = "✅ Guardado. Esperando conexión..."
+        msg = "✅ Guardado."
     c = current_user.credenciales_vox
-    return f"""<style>body{{font-family:sans-serif;padding:40px;text-align:center;background:#f4f7f6}}form{{background:white;padding:30px;display:inline-block;border-radius:10px}}input{{display:block;margin:10px auto;padding:10px;width:300px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px}}</style><h1>📡 Configurar VOX</h1><form method="POST"><label>IP Local</label><input name="ip" value="{c.vox_ip if c else '10.6.235.229'}"><label>Usuario VOX</label><input name="u" value="{c.vox_usuario if c else ''}"><label>Clave VOX</label><input type="password" name="p" value="{c.vox_clave if c else ''}"><button>Guardar</button></form><p style="color:green">{msg}</p><br><a href="/">Volver</a>"""
+    val_ip = c.vox_ip if c else "10.6.235.229"
+    return f"""<style>body{{font-family:sans-serif;padding:40px;text-align:center}}input{{display:block;width:300px;margin:10px auto;padding:10px}}button{{padding:10px 30px}}</style><h1>Configurar VOX</h1><form method="POST"><label>IP</label><input name="ip" value="{val_ip}"><label>User</label><input name="u" value="{c.vox_usuario if c else ''}"><label>Pass</label><input name="p" type="password" value="{c.vox_clave if c else ''}"><button>Guardar</button></form><p style="color:green">{msg}</p><br><a href="/">Volver</a>"""
 
 @app.route('/estacion/ver-reportes')
 @login_required
 def ver_reportes_html(): return render_template('index.html', usuario=current_user.username)
 
 # --- APIS SCRIPT ---
-@app.route('/api/obtener-credenciales', methods=['POST'])
-def api_creds():
-    tk = request.headers.get('X-API-TOKEN')
-    u = User.query.filter_by(api_token=tk).first()
-    if u and u.credenciales_vox: return jsonify({"vox_ip": u.credenciales_vox.vox_ip, "vox_usuario": u.credenciales_vox.vox_usuario, "vox_clave": u.credenciales_vox.vox_clave}), 200
-    return jsonify({"error": "No conf"}), 404
+@app.route('/api/lanzar-extraccion', methods=['POST'])
+@login_required
+def lanzar_extraccion():
+    current_user.comando_pendiente = 'EXTRACT'
+    db.session.commit()
+    return redirect(url_for('panel_estacion'))
 
-@app.route('/api/estado-conexion', methods=['POST'])
-def api_est():
+@app.route('/api/polling', methods=['POST'])
+def polling():
+    # El script llama a esto cada 5 segundos para ver si hay órdenes
     tk = request.headers.get('X-API-TOKEN')
     u = User.query.filter_by(api_token=tk).first()
-    if u:
-        u.status_conexion = request.json.get('status')
-        u.last_check = datetime.now(); db.session.commit()
-        return jsonify({"msg": "OK"}), 200
-    return jsonify({"error": "404"}), 404
+    if not u: return jsonify({"error": "Token invalido"}), 403
+    
+    # Actualizamos "latido" (heartbeat) para saber que está online
+    u.status_conexion = 'ok'
+    u.last_check = datetime.now()
+    
+    comando = None
+    if u.comando_pendiente:
+        comando = u.comando_pendiente
+        u.comando_pendiente = None # Limpiamos la orden porque ya se entregó
+    
+    db.session.commit()
+    
+    # Devolvemos credenciales SIEMPRE para que el script las tenga frescas
+    creds = {}
+    if u.credenciales_vox:
+        creds = {"ip": u.credenciales_vox.vox_ip, "u": u.credenciales_vox.vox_usuario, "p": u.credenciales_vox.vox_clave}
+        
+    return jsonify({"command": comando, "creds": creds}), 200
 
 @app.route('/api/reportar', methods=['POST'])
 def rep():
     try:
-        tk = request.headers.get('X-API-TOKEN')
-        u = User.query.filter_by(api_token=tk).first()
-        if not u: return jsonify({"error": "Token invalido"}), 403
+        tk = request.headers.get('X-API-TOKEN'); u = User.query.filter_by(api_token=tk).first()
+        if not u: return jsonify({"error": "Token"}), 403
         n = request.json; nid = n.get('id_interno')
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): return jsonify({"status":"ignorado"}),200
         f,t,d = procesar_fecha_turno(n.get('fecha'))
@@ -204,14 +224,14 @@ def rep():
 
 @app.route('/api/check-status')
 @login_required
-def chk_st(): return jsonify({"status": current_user.status_conexion})
+def chk_st(): return jsonify({"status": current_user.status_conexion, "cmd": current_user.comando_pendiente})
 
 def auto_setup():
     try:
         with app.app_context():
             db.create_all()
             if not User.query.filter_by(username='admin').first():
-                a = User(username='admin', role='superadmin'); a.set_password('admin123'); db.session.add(a); db.session.commit()
+                a = User(username='admin', role='superadmin', api_token='MASTER'); a.set_password('admin123'); db.session.add(a); db.session.commit()
     except: pass
 auto_setup()
 
