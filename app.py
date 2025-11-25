@@ -1,4 +1,5 @@
 import os
+import secrets # Para generar tokens seguros
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -30,11 +31,11 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
     
-    # Relaciones
+    # 🔐 NUEVO: Token de API único para el script
+    api_token = db.Column(db.String(100), unique=True, nullable=True) 
+
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False)
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False)
-    
-    # Estado Conexión
     status_conexion = db.Column(db.String(20), default='pendiente')
     last_check = db.Column(db.DateTime)
 
@@ -138,7 +139,10 @@ def panel_superadmin():
         if User.query.filter_by(username=u_user).first():
             mensaje = "❌ Usuario existente."
         else:
-            nuevo_user = User(username=u_user, role=u_role)
+            # Generamos TOKEN automático
+            token_seguro = secrets.token_hex(16) # Genera string aleatorio de 32 caracteres
+            
+            nuevo_user = User(username=u_user, role=u_role, api_token=token_seguro)
             nuevo_user.set_password(u_pass)
             db.session.add(nuevo_user)
             db.session.commit()
@@ -175,19 +179,26 @@ def panel_estacion():
     icono_estado = "⚪ Pendiente"
     clase_estado = ""
     if estado_conex == 'ok': 
-        icono_estado = "✅ Conectado OK"
-        clase_estado = "ok"
+        icono_estado = "✅ Conectado OK"; clase_estado = "ok"
     elif estado_conex == 'error': 
-        icono_estado = "❌ Error Conexión"
-        clase_estado = "error"
+        icono_estado = "❌ Error Conexión"; clase_estado = "error"
 
     tiene_creds = "Configurar"
     if current_user.credenciales_vox: tiene_creds = "Modificar"
 
+    # Mostramos el TOKEN para copiar
+    token_visible = current_user.api_token or "No generado"
+
     return f"""
-    <style>body{{font-family:'Segoe UI',sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.container{{max-width:600px;margin:0 auto}}.btn-grande{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.05);text-align:left;cursor:pointer;text-decoration:none;color:#333;font-size:1.1rem;transition:0.2s}}.btn-grande:hover{{transform:translateY(-3px)}}.estado{{float:right;font-size:0.9rem;padding:5px 10px;border-radius:20px;background:#eee}}.estado.ok{{background:#d4edda;color:#155724}}.estado.error{{background:#f8d7da;color:#721c24}}</style>
+    <style>body{{font-family:'Segoe UI',sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.container{{max-width:600px;margin:0 auto}}.btn-grande{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.05);text-align:left;cursor:pointer;text-decoration:none;color:#333;font-size:1.1rem;transition:0.2s}}.btn-grande:hover{{transform:translateY(-3px)}}.estado{{float:right;font-size:0.9rem;padding:5px 10px;border-radius:20px;background:#eee}}.estado.ok{{background:#d4edda;color:#155724}}.estado.error{{background:#f8d7da;color:#721c24}}.token-box{{background:#2c3e50;color:white;padding:15px;border-radius:8px;margin-bottom:20px;word-break:break-all;font-family:monospace}}</style>
     <div class="container">
         <h1>Hola, {nom} 👋</h1>
+        
+        <div class="token-box">
+            <small>🔑 TU TOKEN DE SEGURIDAD (Copiar en config.json):</small><br>
+            <b>{token_visible}</b>
+        </div>
+
         <p>Panel de Configuración</p>
         
         <a href="/estacion/config-vox" class="btn-grande">
@@ -205,51 +216,62 @@ def panel_estacion():
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
-    mensaje = ""
     if request.method == 'POST':
-        u_ip = request.form.get('vox_ip')
-        u_vox = request.form.get('vox_user')
-        p_vox = request.form.get('vox_pass')
-        
+        u_ip = request.form.get('vox_ip'); u_vox = request.form.get('vox_user'); p_vox = request.form.get('vox_pass')
         cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
         if not cred: cred = CredencialVox(user_id=current_user.id)
-        
-        cred.vox_ip = u_ip
-        cred.vox_usuario = u_vox
-        cred.vox_clave = p_vox
-        current_user.status_conexion = 'pendiente' 
-        db.session.add(cred)
-        db.session.commit()
-        mensaje = "✅ Datos guardados."
+        cred.vox_ip = u_ip; cred.vox_usuario = u_vox; cred.vox_clave = p_vox
+        current_user.status_conexion = 'pendiente' # Reseteamos estado
+        db.session.add(cred); db.session.commit()
+        return redirect(url_for('config_vox'))
 
     cred = current_user.credenciales_vox
     val_ip = cred.vox_ip if cred else "10.6.235.229"
-    val_u = cred.vox_usuario if cred else ""
-    val_p = cred.vox_clave if cred else ""
+    val_u = cred.vox_usuario if cred else ""; val_p = cred.vox_clave if cred else ""
+    
+    st = current_user.status_conexion
+    status_html = ""
+    if st == 'pendiente':
+        status_html = """<div class="status-box pending">🟡 <b>Esperando conexión...</b><br>Ejecuta el script en tu PC con el TOKEN configurado.<br><span id="loader">⏳ Buscando señal...</span></div>"""
+    elif st == 'ok':
+        status_html = """<div class="status-box success">✅ <b>¡Conexión Exitosa!</b></div>"""
+    elif st == 'error':
+        status_html = """<div class="status-box error">❌ <b>Error de Conexión</b></div>"""
+
     return f"""
-    <style>body{{font-family:sans-serif;padding:40px;text-align:center;background:#f4f7f6}}form{{background:white;padding:30px;display:inline-block;border-radius:10px}}input{{display:block;margin:15px auto;padding:10px;width:300px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px;cursor:pointer}}label{{display:block;text-align:left;margin-left:15px}}</style>
-    <h1>📡 Datos VOX</h1>
-    <form method="POST">
-        <label>IP Servidor:</label><input type="text" name="vox_ip" value="{val_ip}" required>
-        <label>Usuario:</label><input type="text" name="vox_user" value="{val_u}" required>
-        <label>Clave:</label><input type="password" name="vox_pass" value="{val_p}" required>
-        <button type="submit">Guardar</button>
-    </form>
-    <p style="color:green">{mensaje}</p><br><a href="/">Volver</a>
+    <!DOCTYPE html><html><head><style>body{{font-family:'Segoe UI',sans-serif;background:#f4f7f6;padding:20px;text-align:center}}.card{{background:white;padding:40px;border-radius:15px;box-shadow:0 10px 25px rgba(0,0,0,0.1);max-width:400px;margin:0 auto;text-align:left}}input{{width:100%;padding:12px;margin:8px 0;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}}label{{font-weight:bold;color:#555;font-size:0.9rem}}button{{width:100%;padding:12px;background:#007bff;color:white;border:none;border-radius:8px;cursor:pointer;font-size:1rem;margin-top:15px}}button:hover{{background:#0056b3}}.status-box{{margin-top:20px;padding:15px;border-radius:8px;text-align:center;font-size:0.9rem}}.pending{{background:#fff3cd;color:#856404;border:1px solid #ffeeba}}.success{{background:#d4edda;color:#155724;border:1px solid #c3e6cb}}.error{{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}}a{{display:block;text-align:center;margin-top:20px;color:#666}}</style><script>setInterval(function(){{fetch('/api/check-status-usuario?token={current_user.api_token}').then(r=>r.json()).then(d=>{{if(d.status==='ok'){{document.getElementById('status-container').innerHTML='<div class="status-box success">✅ <b>¡Conectado!</b><br>Redireccionando...</div>';setTimeout(()=>window.location.reload(),2000)}}else if(d.status==='error'){{if(!document.querySelector('.error'))window.location.reload()}} }})}},3000);</script></head><body><h1>📡 Configuración VOX</h1><div class="card"><form method="POST"><label>IP Servidor VOX</label><input type="text" name="vox_ip" value="{val_ip}" required><label>Usuario VOX</label><input type="text" name="vox_user" value="{val_u}" required><label>Contraseña VOX</label><input type="password" name="vox_pass" value="{val_p}" required><button type="submit">💾 Guardar y Probar Conexión</button></form><div id="status-container">{status_html}</div><a href="/">Volver al Panel</a></div></body></html>
     """
 
 @app.route('/estacion/ver-reportes')
 @login_required
-def ver_reportes_html():
-    return render_template('index.html', usuario=current_user.username)
+def ver_reportes_html(): return render_template('index.html', usuario=current_user.username)
 
-# --- APIS SCRIPT ---
+# --- API CHECK STATUS (INTERNA) ---
+@app.route('/api/check-status-usuario')
+def check_status_user():
+    # Verificamos por TOKEN en la URL (para simplificar el JS) o sesión
+    token = request.args.get('token')
+    user = None
+    if current_user.is_authenticated: user = current_user
+    elif token: user = User.query.filter_by(api_token=token).first()
+    
+    if user: return jsonify({"status": user.status_conexion})
+    return jsonify({"status": "unknown"})
+
+# --- APIS PROTEGIDAS (TOKEN REQUERIDO) ---
+
+def verificar_token():
+    """Verifica que el request traiga el token válido"""
+    token = request.headers.get('X-API-TOKEN')
+    if not token: return None
+    return User.query.filter_by(api_token=token).first()
 
 @app.route('/api/obtener-credenciales', methods=['POST'])
 def api_credenciales():
-    u_web = request.json.get('usuario_web')
-    user = User.query.filter_by(username=u_web).first()
-    if user and user.credenciales_vox:
+    user = verificar_token()
+    if not user: return jsonify({"error": "Token invalido"}), 403
+    
+    if user.credenciales_vox:
         return jsonify({
             "vox_ip": user.credenciales_vox.vox_ip,
             "vox_usuario": user.credenciales_vox.vox_usuario, 
@@ -259,24 +281,23 @@ def api_credenciales():
 
 @app.route('/api/estado-conexion', methods=['POST'])
 def api_estado():
+    user = verificar_token()
+    if not user: return jsonify({"error": "Token invalido"}), 403
+    
     data = request.json
-    u_web = data.get('usuario_web')
     status = data.get('status')
-    user = User.query.filter_by(username=u_web).first()
-    if user:
-        user.status_conexion = status
-        user.last_check = datetime.now()
-        db.session.commit()
-        return jsonify({"msg": "OK"}), 200
-    return jsonify({"error": "User not found"}), 404
+    user.status_conexion = status
+    user.last_check = datetime.now()
+    db.session.commit()
+    return jsonify({"msg": "OK"}), 200
 
 @app.route('/api/reportar', methods=['POST'])
 def recibir_reporte():
     try:
+        user = verificar_token()
+        if not user: return jsonify({"error": "Token invalido"}), 403
+
         nuevo = request.json
-        u_web = nuevo.get('usuario_web')
-        user = User.query.filter_by(username=u_web).first()
-        if not user: return jsonify({"status": "error", "msg": "Usuario Web desconocido"}), 404
         nid = nuevo.get('id_interno')
         if Reporte.query.filter_by(id_interno=nid, user_id=user.id).first():
             return jsonify({"status": "ignorado"}), 200
@@ -293,22 +314,17 @@ def recibir_reporte():
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
 
-# --- INICIALIZADOR SEGURO ---
+# --- AUTO SETUP ---
 def auto_setup():
-    # Bloque Try-Except para evitar que el deploy falle si la DB no está lista
     try:
         with app.app_context():
             db.create_all()
             if not User.query.filter_by(username='admin').first():
-                print("⚙️ Setup: Creando Admin...")
-                admin = User(username='admin', role='superadmin')
-                admin.set_password('admin123')
-                db.session.add(admin)
+                a = User(username='admin', role='superadmin', api_token='ADMIN_TOKEN_MASTER')
+                a.set_password('admin123')
+                db.session.add(a)
                 db.session.commit()
-                print("✅ Admin creado.")
-    except Exception as e:
-        print(f"⚠️ Advertencia en Setup (Puede requerir reinicio DB): {e}")
-
+    except: pass
 auto_setup()
 
 if __name__ == '__main__':
