@@ -1,7 +1,18 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()  # <--- ESTO OBLIGA A LEER EL ARCHIVO .ENV
 import secrets
 import random
 import string
+# ... imports ...
+load_dotenv()
+
+db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
+
+# AGREGA ESTA LÍNEA PARA VER QUÉ PASA:
+print(f"\n👀 OJO AQUÍ -> URL DETECTADA: {db_url}\n")
+
+# ... resto del código ...
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -21,6 +32,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'CLAVE_SUPER_SECRETA_PRODUCCION'
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
