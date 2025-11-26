@@ -382,6 +382,36 @@ def api_res(fecha):
             res[r.turno]["cierres"]+=1
             
     return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
+# --- NUEVA RUTA PARA ACTUALIZAR EL DASHBOARD EN VIVO ---
+@app.route('/admin/api/status-all')
+@login_required
+def admin_status_all():
+    if not current_user.is_superadmin: return jsonify([])
+    
+    users = User.query.all()
+    data = []
+    ahora = datetime.now()
+    
+    for u in users:
+        # Lógica de estado
+        estado = u.status_conexion
+        
+        # Si dice online pero hace 2 mins no habla, es offline
+        if u.last_check and (ahora - u.last_check).total_seconds() > 120:
+            estado = 'offline'
+        
+        # Formatear fecha
+        fecha = "Nunca"
+        if u.last_check:
+            fecha = u.last_check.strftime('%d/%m %H:%M:%S')
+
+        data.append({
+            "id": u.id,
+            "status": estado,
+            "code": u.device_pairing_code,
+            "last_check": fecha
+        })
+    return jsonify(data)
 
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
