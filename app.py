@@ -246,4 +246,4 @@ def api_res(fecha):
         if r.turno in res: res[r.turno]["monto"]+=r.monto; res[r.turno]["cierres"]+=1
     return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
 
-if __name__ == '__main__': app.run(host='0.0.0.0', port=10000)flask db init
+if __name__ == '__main__': app.run(host='0.0.0.0', port=10000)
