@@ -232,12 +232,15 @@ def config_vox():
             c.vox_usuario = u
             c.vox_clave = p
             
-            # Cambiar estado a pendiente
+            # 1. Cambiar estado a pendiente
             current_user.status_conexion = 'pendiente'
-            db.session.add(current_user)
             
+            # 2. AUTOMÁTICO: Ordenar extracción al guardar configuración para probarla
+            current_user.comando_pendiente = 'EXTRACT' 
+            
+            db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado. Esperando sincronización..."
+            msg = "✅ Guardado. Se ha ordenado una extracción automática..."
         except Exception as e:
             db.session.rollback() # Deshacer cambios si falla
             print(f"ERROR DB: {e}")
@@ -270,6 +273,10 @@ def handshake_poll():
         user.device_pairing_code = None 
         user.status_conexion = 'online'
         user.last_check = datetime.now()
+        
+        # AUTOMÁTICO: Ordenar extracción inmediata al vincular por primera vez
+        user.comando_pendiente = 'EXTRACT'
+        
         db.session.commit()
         
         return jsonify({"status": "linked", "api_token": token_real}), 200
@@ -298,7 +305,7 @@ def agent_sync():
         user.comando_pendiente = None
         db.session.commit()
     
-    # Enviar configuración actual
+    # Enviar configuración actual (Aquí conecta Vox con el Script)
     conf = {}
     if user.credenciales_vox:
         conf = {
@@ -311,7 +318,7 @@ def agent_sync():
 
 @app.route('/api/reportar', methods=['POST'])
 def rep():
-    # Recibe reportes extraídos
+    # Recibe reportes extraídos desde el script
     try:
         tk = request.headers.get('X-API-TOKEN')
         u = User.query.filter_by(api_token=tk).first()
@@ -321,11 +328,13 @@ def rep():
         n = request.json
         nid = n.get('id_interno')
         
+        # Evitamos guardar duplicados
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
         f,t,d = procesar_fecha_turno(n.get('fecha'))
         
+        # Guardamos vinculado al usuario (Conectando reporte a la visualización)
         r = Reporte(
             user_id=u.id, 
             id_interno=nid, 
@@ -363,6 +372,7 @@ def lanzar():
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
+    # Visualización: Filtra SOLO reportes del usuario actual
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
     
     res = {k: {"monto":0.0,"horario":"-","cierres":0} for k in ["Mañana","Tarde","Noche"]}
