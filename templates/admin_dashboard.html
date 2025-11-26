@@ -28,12 +28,41 @@
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
         th { background-color: #f8f9fa; }
         
-        /* Estados */
-        .status-online { color: green; font-weight: bold; }
+        /* ESTADOS Y ANIMACIONES */
+        .status-online { color: green; font-weight: bold; display: flex; align-items: center; gap: 5px; }
         .status-offline { color: red; font-weight: bold; }
-        .status-waiting { color: orange; font-weight: bold; }
         
-        .code-display { font-family: monospace; background: #eee; padding: 2px 5px; border-radius: 3px; font-size: 1.1em; }
+        .status-waiting { 
+            color: #d39e00; 
+            font-weight: bold; 
+            background: #fff3cd;
+            padding: 5px 10px;
+            border-radius: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid #ffeeba;
+        }
+
+        /* Relojito girando */
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid #d39e00;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .code-display { font-family: monospace; font-size: 1.2em; color: #333; margin-top: 4px; display: block; }
+        .badge-new { background: #28a745; color: white; font-size: 0.7em; padding: 2px 5px; border-radius: 4px; animation: pulse 2s infinite; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -53,35 +82,35 @@
 
     <!-- CREAR NUEVA ESTACIÓN -->
     <div class="card">
-        <h2>➕ Crear Nueva Estación / Usuario</h2>
+        <h2>➕ Crear Nueva Estación</h2>
         <form method="POST">
             <input type="hidden" name="create_user" value="1">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                 <div class="form-group">
-                    <label>Usuario (Login):</label>
+                    <label>Usuario:</label>
                     <input type="text" name="username" required placeholder="ej: estacion1">
                 </div>
                 <div class="form-group">
                     <label>Contraseña:</label>
-                    <input type="text" name="password" required placeholder="clave segura">
+                    <input type="text" name="password" required placeholder="clave">
                 </div>
                 <div class="form-group">
-                    <label>Nombre de Fantasía (Estación):</label>
-                    <input type="text" name="nombre" placeholder="ej: Shell Centro">
+                    <label>Nombre Fantasía:</label>
+                    <input type="text" name="nombre" placeholder="ej: Shell Ruta 2">
                 </div>
                 <div class="form-group">
                     <label>Rol:</label>
                     <select name="role">
-                        <option value="estacion">Estación (Cliente)</option>
+                        <option value="estacion">Estación</option>
                         <option value="superadmin">Administrador</option>
                     </select>
                 </div>
             </div>
-            <button type="submit" class="btn-primary" style="margin-top:10px; width:100%">Crear Usuario</button>
+            <button type="submit" class="btn-primary" style="width:100%; margin-top:10px;">Crear Usuario</button>
         </form>
     </div>
 
-    <!-- VINCULACIÓN MANUAL (Opcional) -->
+    <!-- VINCULACIÓN MANUAL -->
     <div class="card">
         <h2>🔗 Vinculación Manual (Si el automático falla)</h2>
         <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
@@ -98,14 +127,14 @@
             </div>
             <div style="flex-grow:1">
                 <label>Código que muestra la PC (AAA-BB):</label>
-                <input type="text" name="pairing_code" placeholder="ej: XRT-99">
+                <input type="text" name="pairing_code" placeholder="ej: 3KW-R5">
             </div>
             <button type="submit" class="btn-warning">Forzar Código</button>
         </form>
     </div>
 
     <!-- LISTA DE USUARIOS -->
-    <h2>📡 Estado de Estaciones</h2>
+    <h2>📡 Estado de Estaciones <span id="loading-indicator" style="font-size:0.5em; color:gray;">(Actualizando...)</span></h2>
     <table>
         <thead>
             <tr>
@@ -116,50 +145,43 @@
                 <th>Acciones</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="users-table-body">
+            <!-- SE LLENA CON JAVASCRIPT PERO DEJAMOS BASE POR SI ACASO -->
             {% for u in users %}
-            <tr>
+            <tr id="row-{{ u.id }}">
                 <td>{{ u.id }}</td>
                 <td>
-                    <strong>{{ u.username }}</strong>
-                    <br>
+                    <strong>{{ u.username }}</strong><br>
                     <small style="color:gray;">{{ u.cliente_info.nombre_fantasia if u.cliente_info else u.role }}</small>
                 </td>
-                <td>
+                <td id="status-cell-{{ u.id }}">
+                    <!-- Estado inicial (server side render) -->
                     {% if u.status_conexion == 'online' %}
                         <span class="status-online">● ONLINE</span>
                     {% elif u.status_conexion == 'waiting' %}
-                        <span class="status-waiting">⏳ Esperando PC...</span>
-                        <br>
+                        <div class="status-waiting">
+                            <div class="spinner"></div>
+                            Esperando PC...
+                        </div>
                         <span class="code-display">{{ u.device_pairing_code }}</span>
                     {% else %}
                         <span class="status-offline">● OFFLINE</span>
                     {% endif %}
                 </td>
-                <td>
-                    {{ u.last_check.strftime('%d/%m %H:%M') if u.last_check else 'Nunca' }}
+                <td id="time-cell-{{ u.id }}">
+                    {{ u.last_check.strftime('%d/%m %H:%M:%S') if u.last_check else 'Nunca' }}
                 </td>
-                
-                <!-- AQUÍ ESTÁ LA CORRECCIÓN SOLICITADA -->
                 <td>
                     <div style="display:flex; gap: 5px;">
-                        
-                        <!-- Botón Revocar (Solo desconecta la PC, no borra usuario) -->
-                        {% if u.api_token or u.device_pairing_code %}
-                        <form method="POST">
+                        <form method="POST" style="display:inline;">
                             <input type="hidden" name="user_id" value="{{ u.id }}">
                             <input type="hidden" name="revoke" value="1">
-                            <button type="submit" class="btn-warning" title="Desconectar PC" style="font-size:0.8em;">🔌 Desvincular</button>
+                            <button type="submit" class="btn-warning" title="Desconectar" style="font-size:0.8em; padding:5px;">🔌</button>
                         </form>
-                        {% endif %}
-
-                        <!-- Botón Eliminar (Borra usuario y datos) - Protegido para no borrarte a ti mismo -->
                         {% if u.id != current_user.id %}
-                        <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('⚠️ ¡PELIGRO!\n\n¿Estás seguro de ELIMINAR a {{ u.username }}?\n\nSe borrarán:\n- Sus reportes históricos.\n- Su configuración.\n- Su acceso.\n\nEsta acción no se puede deshacer.');">
-                            <button type="submit" class="btn-danger" title="Eliminar definitivamente" style="font-size:0.8em;">🗑️ Eliminar</button>
+                        <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿Eliminar?');" style="display:inline;">
+                            <button type="submit" class="btn-danger" title="Eliminar" style="font-size:0.8em; padding:5px;">🗑️</button>
                         </form>
-                        {% else %}
-                            <small>(Tú)</small>
                         {% endif %}
                     </div>
                 </td>
@@ -167,8 +189,55 @@
             {% endfor %}
         </tbody>
     </table>
-
 </div>
+
+<!-- SCRIPT DE ACTUALIZACIÓN AUTOMÁTICA -->
+<script>
+    function updateStatus() {
+        fetch('/admin/api/status-all')
+            .then(response => response.json())
+            .then(data => {
+                const indicator = document.getElementById('loading-indicator');
+                indicator.style.opacity = '1';
+                setTimeout(() => indicator.style.opacity = '0', 500);
+
+                data.forEach(user => {
+                    const statusCell = document.getElementById(`status-cell-${user.id}`);
+                    const timeCell = document.getElementById(`time-cell-${user.id}`);
+                    
+                    if (statusCell && timeCell) {
+                        // Actualizar Hora
+                        timeCell.innerText = user.last_check;
+
+                        // Actualizar Estado Visualmente
+                        let htmlStatus = '';
+                        if (user.status === 'online') {
+                            htmlStatus = `<span class="status-online">● ONLINE <span class="badge-new">LIVE</span></span>`;
+                        } else if (user.status === 'waiting') {
+                            htmlStatus = `
+                                <div class="status-waiting">
+                                    <div class="spinner"></div>
+                                    Esperando PC...
+                                </div>
+                                <span class="code-display">${user.code}</span>
+                            `;
+                        } else {
+                            htmlStatus = `<span class="status-offline">● OFFLINE</span>`;
+                        }
+                        
+                        // Solo reemplazar si cambió para evitar parpadeos innecesarios
+                        if (statusCell.innerHTML.trim() !== htmlStatus.trim()) {
+                            statusCell.innerHTML = htmlStatus;
+                        }
+                    }
+                });
+            })
+            .catch(err => console.error("Error polling:", err));
+    }
+
+    // Ejecutar cada 2 segundos
+    setInterval(updateStatus, 2000);
+</script>
 
 </body>
 </html>
