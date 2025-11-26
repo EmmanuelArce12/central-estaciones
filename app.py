@@ -212,15 +212,31 @@ def panel_estacion():
 def config_vox():
     msg = ""
     if request.method == 'POST':
-        ip = request.form.get('ip'); u = request.form.get('u'); p = request.form.get('p')
-        c = CredencialVox.query.filter_by(user_id=current_user.id).first()
-        if not c: c = CredencialVox(user_id=current_user.id)
-        c.vox_ip = ip; c.vox_usuario = u; c.vox_clave = p
-        
-        # Si cambiamos credenciales, forzamos un chequeo
-        current_user.status_conexion = 'pendiente'
-        db.session.add(c); db.session.commit()
-        msg = "✅ Guardado. Esperando sincronización..."
+        try:
+            ip = request.form.get('ip')
+            u = request.form.get('u')
+            p = request.form.get('p')
+            
+            # Buscar credencial existente o crear nueva
+            c = CredencialVox.query.filter_by(user_id=current_user.id).first()
+            if not c: 
+                c = CredencialVox(user_id=current_user.id)
+                db.session.add(c) # IMPORTANTE: Agregar explícitamente a la sesión
+            
+            c.vox_ip = ip
+            c.vox_usuario = u
+            c.vox_clave = p
+            
+            # Actualizamos estado del usuario
+            current_user.status_conexion = 'pendiente'
+            db.session.add(current_user) # Asegurar que el usuario está en sesión para el commit
+            
+            db.session.commit()
+            msg = "✅ Guardado. Esperando sincronización..."
+        except Exception as e:
+            db.session.rollback()
+            print(f"ERROR AL GUARDAR VOX: {e}")
+            msg = f"❌ Error interno: {str(e)}"
     
     cred = current_user.credenciales_vox
     return render_template('config_vox.html', cred=cred, msg=msg, user=current_user)
@@ -264,14 +280,19 @@ def agent_sync():
     
     if not user: return jsonify({"status": "revoked"}), 401
     
-    # Heartbeat: Actualizamos que está vivo
-    user.status_conexion = 'online'
-    user.last_check = datetime.now()
+    # OPTIMIZACIÓN DE VELOCIDAD:
+    # Solo escribimos en la DB si pasaron más de 60 segundos desde el último check
+    # Esto reduce drásticamente el lag en servidores gratuitos/lentos.
+    ahora = datetime.now()
+    if not user.last_check or (ahora - user.last_check).total_seconds() > 60:
+        user.status_conexion = 'online'
+        user.last_check = ahora
+        db.session.commit()
     
     cmd = user.comando_pendiente
-    if cmd: user.comando_pendiente = None # Consumir comando
-    
-    db.session.commit()
+    if cmd: 
+        user.comando_pendiente = None # Consumir comando
+        db.session.commit() # Si hay comando, guardamos inmediatamente
     
     conf = {}
     if user.credenciales_vox:
@@ -350,5 +371,4 @@ def api_res(fecha):
     return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
 
 if __name__ == '__main__': 
-    # init_db() # Descomentar si es la primera vez local
-    app.run(host='0.0.0.0', port=10000)
+    # init_db() # Descomentar si es la primera vez l
