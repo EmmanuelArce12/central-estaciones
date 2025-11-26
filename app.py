@@ -8,13 +8,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
+# Cargar variables de entorno (si existe archivo .env local)
 load_dotenv()
 
 app = Flask(__name__)
 
 # --- CONFIGURACIÓN ---
 # Detectar base de datos de Render (PostgreSQL) o usar local (SQLite)
+# IMPORTANTE: Configura DATABASE_URL en las variables de entorno de Render
 db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -80,12 +81,11 @@ class Reporte(db.Model):
     turno = db.Column(db.String(20))
     hora_cierre = db.Column(db.DateTime)
 
-# --- INICIALIZACIÓN DE DB (CRÍTICO PARA RENDER) ---
-# Ejecutamos esto en el contexto global para asegurar que las tablas existan al arrancar Gunicorn
+# --- INICIALIZACIÓN DE DB ---
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Tablas de base de datos verificadas/creadas correctamente.")
+        print("✅ Tablas de base de datos verificadas.")
     except Exception as e:
         print(f"⚠️ Advertencia DB Init: {e}")
 
@@ -94,7 +94,6 @@ def load_user(uid):
     return User.query.get(int(uid))
 
 def procesar_fecha_turno(s):
-    # Lógica para convertir la fecha del reporte de Vox en Turno (Mañana/Tarde/Noche)
     try:
         p = s.split(' - '); cr = p[1].replace(')', '').strip()
         dt = datetime.strptime(cr, "%Y/%m/%d %H:%M:%S")
@@ -162,7 +161,6 @@ def panel_superadmin():
                 msg = "✅ Usuario creado correctamente."
                 
         elif 'link_pc' in request.form:
-            # Vinculación manual robusta: Mayúsculas y sin espacios
             code_input = request.form.get('pairing_code', '').strip().upper()
             user_id = request.form.get('user_id')
             user = User.query.get(user_id)
@@ -207,18 +205,13 @@ def panel_estacion():
         is_loading = True
     return render_template('station_dashboard.html', user=current_user, btn_txt=btn_txt, is_loading=is_loading)
 
+# --- VISTA CORREGIDA PARA CONFIGURACIÓN VOX ---
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
     msg = ""
-    # BLINDAJE PARA EVITAR ERROR 500 (ProgrammingError si tabla no existe)
-    try:
-        cred = current_user.credenciales_vox
-    except Exception as e:
-        print(f"Error leyendo credenciales (posible tabla faltante): {e}")
-        # Intento de emergencia para crear tabla si falló el init global
-        with app.app_context(): db.create_all()
-        cred = None
+    # Intentamos obtener credenciales existentes
+    cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
 
     if request.method == 'POST':
         try:
@@ -226,27 +219,31 @@ def config_vox():
             u = request.form.get('u')
             p = request.form.get('p')
             
-            c = CredencialVox.query.filter_by(user_id=current_user.id).first()
-            if not c: 
-                c = CredencialVox(user_id=current_user.id)
-                db.session.add(c) 
+            # Si no existen, las creamos
+            if not cred: 
+                cred = CredencialVox(user_id=current_user.id)
+                db.session.add(cred) 
             
-            c.vox_ip = ip
-            c.vox_usuario = u
-            c.vox_clave = p
+            # Actualizamos datos
+            cred.vox_ip = ip
+            cred.vox_usuario = u
+            cred.vox_clave = p
             
-            # Al guardar, lanzamos prueba automática
+            # IMPORTANTE: Forzamos estado para enviar a PC
             current_user.status_conexion = 'pendiente'
             current_user.comando_pendiente = 'EXTRACT' 
             
-            db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado. Se ha ordenado una extracción automática..."
-            cred = c
+            msg = "✅ Guardado. Datos enviados a la estación para sincronización."
         except Exception as e:
             db.session.rollback()
             msg = f"❌ Error interno al guardar: {str(e)}"
-    
+
+    # SOLUCIÓN ERROR 500: Si cred sigue siendo None, creamos un objeto 'falso'
+    # para que el template HTML no falle al intentar leer .vox_ip
+    if not cred:
+        cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
+
     return render_template('config_vox.html', cred=cred, msg=msg, user=current_user)
 
 @app.route('/estacion/ver-reportes')
@@ -270,8 +267,7 @@ def handshake_poll():
         user.device_pairing_code = None 
         user.status_conexion = 'online'
         user.last_check = datetime.now()
-        # Lanzamos orden de extracción al vincular
-        user.comando_pendiente = 'EXTRACT'
+        user.comando_pendiente = 'EXTRACT' # Lanzar primera extracción al vincular
         
         db.session.commit()
         return jsonify({"status": "linked", "api_token": token_real}), 200
@@ -284,20 +280,17 @@ def agent_sync():
     
     if not user: return jsonify({"status": "revoked"}), 401
     
-    # Optimización: Escribir en DB solo cada 60s
     ahora = datetime.now()
     if not user.last_check or (ahora - user.last_check).total_seconds() > 60:
         user.status_conexion = 'online'
         user.last_check = ahora
         db.session.commit()
     
-    # Revisar comandos pendientes
     cmd = user.comando_pendiente
     if cmd: 
         user.comando_pendiente = None
         db.session.commit()
     
-    # Enviar configuración actual
     conf = {}
     if user.credenciales_vox:
         conf = {
@@ -319,7 +312,6 @@ def rep():
         n = request.json
         nid = n.get('id_interno')
         
-        # Evitar duplicados
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
@@ -366,7 +358,6 @@ def api_res(fecha):
             res[r.turno]["cierres"]+=1
     return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
 
-# --- NUEVA RUTA PARA PANEL EN VIVO (ADMIN) ---
 @app.route('/admin/api/status-all')
 @login_required
 def admin_status_all():
@@ -376,7 +367,6 @@ def admin_status_all():
     ahora = datetime.now()
     for u in users:
         estado = u.status_conexion
-        # Offline si no hay señal en 2 mins
         if u.last_check and (ahora - u.last_check).total_seconds() > 120: 
             estado = 'offline'
         
