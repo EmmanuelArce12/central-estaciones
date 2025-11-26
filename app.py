@@ -1,18 +1,5 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()  # <--- ESTO OBLIGA A LEER EL ARCHIVO .ENV
 import secrets
-import random
-import string
-# ... imports ...
-load_dotenv()
-
-db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
-
-# AGREGA ESTA LÍNEA PARA VER QUÉ PASA:
-print(f"\n👀 OJO AQUÍ -> URL DETECTADA: {db_url}\n")
-
-# ... resto del código ...
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -33,6 +20,7 @@ app.config['SECRET_KEY'] = 'CLAVE_SUPER_SECRETA_PRODUCCION'
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
@@ -46,18 +34,18 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
     
-    # VINCULACIÓN
+    # Token Único para el Agente .EXE
     api_token = db.Column(db.String(100), unique=True, nullable=True)
-    device_pairing_code = db.Column(db.String(20), nullable=True) # Código temporal (ej: A1-B2)
     
-    # ESTADO
+    # Estado de la conexión del Agente
     status_conexion = db.Column(db.String(20), default='offline')
     comando_pendiente = db.Column(db.String(50), nullable=True) # Ej: 'EXTRACT'
     last_check = db.Column(db.DateTime)
     
-    # RELACIONES
+    # Relaciones
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False)
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False)
+    reportes = db.relationship('Reporte', backref='usuario', lazy=True)
 
     def set_password(self, p): self.password_hash = generate_password_hash(p)
     def check_password(self, p): return check_password_hash(self.password_hash, p)
@@ -89,6 +77,7 @@ class Reporte(db.Model):
     fecha_operativa = db.Column(db.String(20))
     turno = db.Column(db.String(20))
     hora_cierre = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 @login_manager.user_loader
 def load_user(uid): return User.query.get(int(uid))
@@ -133,74 +122,57 @@ def panel_superadmin():
     if not current_user.is_superadmin: return "Acceso Denegado"
     msg = ""
     
-    # LINK PC (VINCULACIÓN DESDE ADMIN)
-    if request.method == 'POST' and 'link_pc' in request.form:
-        uid = request.form.get('user_id')
-        code = request.form.get('code')
-        u = User.query.get(uid)
-        if u:
-            u.device_pairing_code = code # Asignamos el código que muestra el EXE
-            u.api_token = secrets.token_hex(24) # Generamos Token
-            db.session.commit()
-            msg = f"✅ Vinculando {u.username} con código {code}..."
-
-    # CREAR USUARIO
+    # CREAR USUARIO CON TOKEN
     if request.method == 'POST' and 'create_user' in request.form:
         u = request.form.get('username'); p = request.form.get('password'); n = request.form.get('nombre'); r = request.form.get('role')
         if User.query.filter_by(username=u).first(): msg = "❌ Existe."
         else:
-            nu = User(username=u, role=r); nu.set_password(p); db.session.add(nu); db.session.commit()
+            # Generamos Token Fijo al crear
+            token_nuevo = "TK-" + secrets.token_hex(6)
+            nu = User(username=u, role=r, api_token=token_nuevo); nu.set_password(p); db.session.add(nu); db.session.commit()
             if r == 'estacion': nc = Cliente(nombre_fantasia=n, user_id=nu.id); db.session.add(nc); db.session.commit()
-            msg = "✅ Creado."
-
-    # REVOCAR
-    if request.method == 'POST' and 'revoke' in request.form:
-        u = User.query.get(request.form.get('user_id'))
-        if u: 
-            u.api_token = None; u.status_conexion = "offline"; u.device_pairing_code = None
-            db.session.commit()
-            msg = "🚫 Revocado."
+            msg = f"✅ Creado. Token: {token_nuevo}"
 
     users = User.query.all(); l = ""
     for u in users:
         if u.role == 'superadmin': continue
         st = "🟢 Online" if u.status_conexion=='online' else "🔴 Offline"
         nom = u.cliente_info.nombre_fantasia if u.cliente_info else "-"
-        
-        controls = ""
-        if u.api_token:
-            controls = f"<form method='POST' style='display:inline'><input type='hidden' name='user_id' value='{u.id}'><input type='hidden' name='revoke' value='1'><button style='background:#dc3545;font-size:0.7em'>Desvincular PC</button></form>"
-        else:
-            controls = f"<form method='POST' style='display:inline'><input type='hidden' name='user_id' value='{u.id}'><input type='hidden' name='link_pc' value='1'><input name='code' placeholder='Código EXE (ej: AB-12)' size='10' required><button style='background:#6c5ce7;font-size:0.7em'>Vincular</button></form>"
+        l += f"<li style='padding:10px;border-bottom:1px solid #eee;background:white;margin:5px;border-radius:5px'><b>{u.username}</b> ({nom})<br><small>Token: {u.api_token}</small><div style='float:right'>{st}</div></li>"
 
-        l += f"<li style='padding:10px;border-bottom:1px solid #eee;background:white;margin:5px;border-radius:5px'><b>{u.username}</b> ({nom}) - {st} <div style='margin-top:5px'>{controls}</div></li>"
-
-    return f"""<style>body{{font-family:sans-serif;padding:30px;background:#f4f7f6;max-width:800px;margin:0 auto}}.card{{background:white;padding:20px;border-radius:10px;margin-bottom:20px}}input,select{{padding:5px;margin:5px}}button{{padding:5px 15px;background:green;color:white;border:none;border-radius:5px;cursor:pointer}}</style><a href="/logout" style="float:right">Salir</a><h1>SuperAdmin</h1><p style="color:blue">{msg}</p><div class="card"><h3>➕ Nueva Estación</h3><form method="POST"><input type="hidden" name="create_user" value="1"><input name="username" placeholder="Usuario" required><input name="password" placeholder="Clave"><input name="nombre" placeholder="Fantasia"><select name="role"><option value="estacion">Estación</option></select><button>Crear</button></form></div><div class="card"><h3>📡 Gestión de PCs</h3><ul style="list-style:none;padding:0">{l}</ul></div>"""
+    return f"""<style>body{{font-family:sans-serif;padding:30px;background:#f4f7f6;max-width:800px;margin:0 auto}}.card{{background:white;padding:20px;border-radius:10px;margin-bottom:20px}}input,select{{padding:5px;margin:5px}}button{{padding:5px 15px;background:green;color:white;border:none;border-radius:5px;cursor:pointer}}</style><a href="/logout" style="float:right">Salir</a><h1>SuperAdmin</h1><p style="color:blue">{msg}</p><div class="card"><h3>➕ Nueva Estación</h3><form method="POST"><input type="hidden" name="create_user" value="1"><input name="username" placeholder="Usuario" required><input name="password" placeholder="Clave"><input name="nombre" placeholder="Fantasia"><select name="role"><option value="estacion">Estación</option></select><button>Crear</button></form></div><div class="card"><h3>📡 Gestión</h3><ul style="list-style:none;padding:0">{l}</ul></div>"""
 
 @app.route('/estacion/panel')
 @login_required
 def panel_estacion():
     if current_user.is_superadmin: return redirect(url_for('panel_superadmin'))
     
-    # Botón de extracción
-    btn_txt = "⬇️ EXTRAER REPORTE AHORA"
-    if current_user.comando_pendiente == 'EXTRACT': btn_txt = "⏳ Solicitando..."
+    # Botón de extracción manual
+    btn_txt = "⬇️ FORZAR EXTRACCIÓN AHORA"
+    btn_style = "background:#007bff"
+    if current_user.comando_pendiente == 'EXTRACT': 
+        btn_txt = "⏳ Enviando orden..."
+        btn_style = "background:gray;cursor:wait"
 
     st = current_user.status_conexion
     icon = "🟢 Conectado" if st=='online' else "🔴 Desconectado"
     cls = "ok" if st=='online' else "err"
 
     return f"""
-    <style>body{{font-family:sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.btn{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005}}.tag{{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}}.ok{{background:#d4edda;color:green}}.err{{background:#f8d7da;color:red}}.act{{background:#007bff;color:white;font-weight:bold;text-align:center}}</style>
+    <style>body{{font-family:sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.btn{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005}}.tag{{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}}.ok{{background:#d4edda;color:green}}.err{{background:#f8d7da;color:red}}.act{{color:white;font-weight:bold;text-align:center}}</style>
     <script>setInterval(()=>{{fetch('/api/ping-ui').then(r=>r.json()).then(d=>{{if(d.st!=='{st}'||d.cmd!=={( 'true' if current_user.comando_pendiente else 'false' )})location.reload()}})}},3000)</script>
     <div style="max-width:600px;margin:0 auto">
         <h1>Hola, {current_user.username}</h1>
-        <p>Estado: <span class="tag {cls}">{icon}</span></p>
+        <p>Estado PC: <span class="tag {cls}">{icon}</span></p>
+        
+        <div style="background:#333;color:white;padding:10px;border-radius:5px;margin-bottom:20px;font-family:monospace">
+            TOKEN INSTALADOR: <b>{current_user.api_token}</b>
+        </div>
         
         <a href="/estacion/config-vox" class="btn">⚙️ Configurar Credenciales VOX</a>
         
         <form method="POST" action="/api/lanzar-orden">
-            <button class="btn act">{btn_txt}</button>
+            <button class="btn act" style="{btn_style}">{btn_txt}</button>
         </form>
 
         <a href="/estacion/ver-reportes" class="btn">📊 Ver Gráficos</a>
@@ -214,49 +186,28 @@ def config_vox():
     msg = ""
     if request.method == 'POST':
         ip = request.form.get('ip'); u = request.form.get('u'); p = request.form.get('p')
+        
         c = CredencialVox.query.filter_by(user_id=current_user.id).first()
         if not c: c = CredencialVox(user_id=current_user.id)
-        c.vox_ip = ip; c.vox_usuario = u; c.vox_clave = p
         
-        # Al guardar config nueva, pasamos a PENDIENTE para forzar chequeo
-        current_user.status_conexion = 'pendiente'
+        c.vox_ip = ip; c.vox_usuario = u; c.vox_clave = p
         db.session.add(c); db.session.commit()
-        msg = "✅ Guardado. Esperando conexión..."
+        msg = "✅ Guardado. El agente recibirá estos datos en breve."
+    
     c = current_user.credenciales_vox
     val_ip = c.vox_ip if c else "10.6.235.229"
     val_u = c.vox_usuario if c else ""; val_p = c.vox_clave if c else ""
     
-    st = current_user.status_conexion
-    st_icon = "✅ Online" if st=='online' else "⏳ Verificando..." if st=='pendiente' else "❌ Offline"
-    
-    return f"""<style>body{{font-family:sans-serif;padding:40px;text-align:center}}input{{display:block;width:300px;margin:10px auto;padding:10px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px}}</style><h1>Configurar VOX</h1><form method="POST"><label>IP Local</label><input name="ip" value="{val_ip}"><label>Usuario VOX</label><input name="u" value="{val_u}"><label>Clave VOX</label><input type="password" name="p" value="{val_p}"><button>Guardar</button></form><p style="color:green">{msg}</p><p>Estado Actual: <b>{st_icon}</b></p><br><a href="/">Volver</a>"""
+    return f"""<style>body{{font-family:sans-serif;padding:40px;text-align:center}}input{{display:block;width:300px;margin:10px auto;padding:10px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px}}</style><h1>Configurar VOX</h1><form method="POST"><label>IP Local</label><input name="ip" value="{val_ip}"><label>Usuario VOX</label><input name="u" value="{val_u}"><label>Clave VOX</label><input type="password" name="p" value="{val_p}"><button>Guardar</button></form><p style="color:green">{msg}</p><br><a href="/">Volver</a>"""
 
 @app.route('/estacion/ver-reportes')
 @login_required
 def ver_reportes_html(): return render_template('index.html', usuario=current_user.username)
 
-# --- 🤝 APIs CRÍTICAS DE CONEXIÓN 🤝 ---
-
-@app.route('/api/handshake/poll', methods=['POST'])
-def handshake_poll():
-    """El EXE consulta si ya lo vincularon"""
-    code = request.json.get('code')
-    user = User.query.filter_by(device_pairing_code=code).first()
-    
-    if user and user.api_token:
-        # Si tiene token, es que el Admin ya le dio click a Vincular
-        token_real = user.api_token
-        user.device_pairing_code = None # Limpieza
-        user.status_conexion = 'online' # 🟢 FEEDBACK INMEDIATO
-        user.last_check = datetime.now()
-        db.session.commit()
-        return jsonify({"status": "linked", "api_token": token_real}), 200
-    
-    return jsonify({"status": "waiting"}), 200
+# --- APIS PARA EL AGENTE ---
 
 @app.route('/api/agent/sync', methods=['POST'])
 def agent_sync():
-    """El EXE ya vinculado pide órdenes y config"""
     token = request.headers.get('X-API-TOKEN')
     user = User.query.filter_by(api_token=token).first()
     
@@ -269,10 +220,9 @@ def agent_sync():
     # Comandos
     cmd = user.comando_pendiente
     if cmd: user.comando_pendiente = None
-    
     db.session.commit()
     
-    # Config
+    # Config VOX para entregar al agente
     conf = {}
     if user.credenciales_vox:
         conf = {"ip": user.credenciales_vox.vox_ip, "u": user.credenciales_vox.vox_usuario, "p": user.credenciales_vox.vox_clave}
@@ -292,7 +242,7 @@ def rep():
         return jsonify({"status":"exito"}),200
     except Exception as e: return jsonify({"status":"error"}),500
 
-# API INTERNA UI
+# API UI
 @app.route('/api/ping-ui')
 @login_required
 def ping(): return jsonify({"st": current_user.status_conexion, "cmd": current_user.comando_pendiente == 'EXTRACT'})
@@ -318,7 +268,7 @@ def auto_setup():
         with app.app_context():
             db.create_all()
             if not User.query.filter_by(username='admin').first():
-                u = User(username='admin', role='superadmin'); u.set_password('admin123'); db.session.add(u); db.session.commit()
+                a = User(username='admin', role='superadmin', api_token='MASTER'); a.set_password('admin123'); db.session.add(a); db.session.commit()
     except: pass
 auto_setup()
 
