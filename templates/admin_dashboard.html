@@ -3,66 +3,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Admin</title>
+    <title>Panel Superadmin - Central VOX</title>
     <style>
-        body{font-family:sans-serif;padding:30px;background:#f4f7f6;max-width:800px;margin:0 auto}
-        .card{background:white;padding:20px;border-radius:10px;box-shadow:0 2px 5px #00000010;margin-bottom:20px}
-        input,select{padding:8px;margin:5px;border:1px solid #ddd;border-radius:4px}
-        button{padding:8px 15px;background:green;color:white;border:none;border-radius:5px;cursor:pointer}
-        .online{color:green} .offline{color:red}
-        ul{list-style:none;padding:0}
-        li{padding:10px;border-bottom:1px solid #eee;background:white;margin:5px;border-radius:5px}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #333; }
+        
+        /* Mensajes */
+        .alert { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 20px; }
+        .alert-error { background-color: #f8d7da; color: #721c24; }
+
+        /* Formularios */
+        .card { background: #fafafa; border: 1px solid #ddd; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .form-group { margin-bottom: 10px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { cursor: pointer; padding: 8px 15px; border: none; border-radius: 4px; font-weight: bold; }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        .btn-warning { background-color: #ffc107; color: black; }
+        
+        /* Tabla */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; }
+        
+        /* Estados */
+        .status-online { color: green; font-weight: bold; }
+        .status-offline { color: red; font-weight: bold; }
+        .status-waiting { color: orange; font-weight: bold; }
+        
+        .code-display { font-family: monospace; background: #eee; padding: 2px 5px; border-radius: 3px; font-size: 1.1em; }
     </style>
 </head>
 <body>
-    <a href="/logout" style="float:right;color:red;text-decoration:none">Cerrar Sesión</a>
-    <h1>👑 Panel SuperAdmin</h1>
-    
-    {% if msg %} <p style="color:blue;font-weight:bold">{{ msg }}</p> {% endif %}
 
+<div class="container">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h1>Panel de Control (Superadmin)</h1>
+        <a href="/logout" style="color:red; text-decoration:none;">Cerrar Sesión</a>
+    </div>
+
+    <!-- Mostrar Mensajes -->
+    {% if msg %}
+        <div class="alert {% if '❌' in msg %}alert-error{% endif %}">
+            {{ msg }}
+        </div>
+    {% endif %}
+
+    <!-- CREAR NUEVA ESTACIÓN -->
     <div class="card">
-        <h3>➕ Nueva Estación</h3>
+        <h2>➕ Crear Nueva Estación / Usuario</h2>
         <form method="POST">
             <input type="hidden" name="create_user" value="1">
-            <input name="username" placeholder="Usuario Login" required>
-            <input name="password" placeholder="Clave" required>
-            <input name="nombre" placeholder="Nombre Fantasia">
-            <select name="role">
-                <option value="estacion">Estación</option>
-                <option value="superadmin">Admin</option>
-            </select>
-            <button>Crear</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="form-group">
+                    <label>Usuario (Login):</label>
+                    <input type="text" name="username" required placeholder="ej: estacion1">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña:</label>
+                    <input type="text" name="password" required placeholder="clave segura">
+                </div>
+                <div class="form-group">
+                    <label>Nombre de Fantasía (Estación):</label>
+                    <input type="text" name="nombre" placeholder="ej: Shell Centro">
+                </div>
+                <div class="form-group">
+                    <label>Rol:</label>
+                    <select name="role">
+                        <option value="estacion">Estación (Cliente)</option>
+                        <option value="superadmin">Administrador</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn-primary" style="margin-top:10px; width:100%">Crear Usuario</button>
         </form>
     </div>
 
+    <!-- VINCULACIÓN MANUAL (Opcional) -->
     <div class="card">
-        <h3>📡 Gestión de Estaciones</h3>
-        <ul>
-            {% for u in users %}
-                {% if u.role != 'superadmin' %}
-                <li>
-                    <b>{{ u.username }}</b> ({{ u.cliente_info.nombre_fantasia if u.cliente_info else '-' }})
-                    - <span class="{{ 'online' if u.status_conexion=='online' else 'offline' }}">
-                        {{ '🟢 Online' if u.status_conexion=='online' else '🔴 Offline' }}
-                    </span>
-                    {% if u.api_token %}
-                    <form method="POST" style="display:inline;float:right">
-                        <input type="hidden" name="revoke" value="1">
-                        <input type="hidden" name="user_id" value="{{ u.id }}">
-                        <button style="background:#dc3545;padding:4px 8px;font-size:0.8rem">Revocar</button>
-                    </form>
-                    {% else %}
-                    <form method="POST" style="display:inline;float:right">
-                        <input type="hidden" name="link_pc" value="1">
-                        <input type="hidden" name="user_id" value="{{ u.id }}">
-                        <input name="code" placeholder="Código EXE" size="8" required>
-                        <button style="background:#6c5ce7;padding:4px 8px;font-size:0.8rem">Vincular</button>
-                    </form>
-                    {% endif %}
-                </li>
-                {% endif %}
-            {% endfor %}
-        </ul>
+        <h2>🔗 Vinculación Manual (Si el automático falla)</h2>
+        <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
+            <input type="hidden" name="link_pc" value="1">
+            <div style="flex-grow:1">
+                <label>Seleccionar Usuario:</label>
+                <select name="user_id">
+                    {% for u in users %}
+                        {% if u.role != 'superadmin' %}
+                            <option value="{{ u.id }}">{{ u.username }} ({{ u.cliente_info.nombre_fantasia if u.cliente_info else '-' }})</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="flex-grow:1">
+                <label>Código que muestra la PC (AAA-BB):</label>
+                <input type="text" name="pairing_code" placeholder="ej: XRT-99">
+            </div>
+            <button type="submit" class="btn-warning">Forzar Código</button>
+        </form>
     </div>
+
+    <!-- LISTA DE USUARIOS -->
+    <h2>📡 Estado de Estaciones</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Estación / Usuario</th>
+                <th>Estado Conexión</th>
+                <th>Última Señal</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.id }}</td>
+                <td>
+                    <strong>{{ u.username }}</strong>
+                    <br>
+                    <small style="color:gray;">{{ u.cliente_info.nombre_fantasia if u.cliente_info else u.role }}</small>
+                </td>
+                <td>
+                    {% if u.status_conexion == 'online' %}
+                        <span class="status-online">● ONLINE</span>
+                    {% elif u.status_conexion == 'waiting' %}
+                        <span class="status-waiting">⏳ Esperando PC...</span>
+                        <br>
+                        <span class="code-display">{{ u.device_pairing_code }}</span>
+                    {% else %}
+                        <span class="status-offline">● OFFLINE</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ u.last_check.strftime('%d/%m %H:%M') if u.last_check else 'Nunca' }}
+                </td>
+                
+                <!-- AQUÍ ESTÁ LA CORRECCIÓN SOLICITADA -->
+                <td>
+                    <div style="display:flex; gap: 5px;">
+                        
+                        <!-- Botón Revocar (Solo desconecta la PC, no borra usuario) -->
+                        {% if u.api_token or u.device_pairing_code %}
+                        <form method="POST">
+                            <input type="hidden" name="user_id" value="{{ u.id }}">
+                            <input type="hidden" name="revoke" value="1">
+                            <button type="submit" class="btn-warning" title="Desconectar PC" style="font-size:0.8em;">🔌 Desvincular</button>
+                        </form>
+                        {% endif %}
+
+                        <!-- Botón Eliminar (Borra usuario y datos) - Protegido para no borrarte a ti mismo -->
+                        {% if u.id != current_user.id %}
+                        <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('⚠️ ¡PELIGRO!\n\n¿Estás seguro de ELIMINAR a {{ u.username }}?\n\nSe borrarán:\n- Sus reportes históricos.\n- Su configuración.\n- Su acceso.\n\nEsta acción no se puede deshacer.');">
+                            <button type="submit" class="btn-danger" title="Eliminar definitivamente" style="font-size:0.8em;">🗑️ Eliminar</button>
+                        </form>
+                        {% else %}
+                            <small>(Tú)</small>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</div>
+
 </body>
 </html>
