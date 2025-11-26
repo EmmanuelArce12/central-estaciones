@@ -130,6 +130,7 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
+# --- CORRECCIÓN AQUÍ: CREACIÓN AUTOMÁTICA DE TABLAS AL CREAR USUARIO ---
 @app.route('/admin/dashboard', methods=['GET', 'POST'])
 @login_required
 def panel_superadmin():
@@ -146,16 +147,25 @@ def panel_superadmin():
             if User.query.filter_by(username=u).first():
                 msg = "❌ El usuario ya existe."
             else:
+                # 1. Crear Usuario Base
                 nu = User(username=u, role=r)
                 nu.set_password(p)
                 db.session.add(nu)
-                db.session.commit()
-                # Creamos el Cliente, PERO NO las credenciales Vox todavía
+                db.session.commit() # Commit necesario para obtener el ID del usuario
+                
+                # 2. Si es estación, crear sus tablas dependientes AUTOMÁTICAMENTE
                 if r == 'estacion':
+                    # A. Crear info Cliente (Nombre Fantasía)
                     nc = Cliente(nombre_fantasia=n, user_id=nu.id)
                     db.session.add(nc)
+                    
+                    # B. Crear Credenciales VOX (Vacías, pero existiendo) <--- ESTO FALTABA
+                    cv = CredencialVox(user_id=nu.id, vox_ip="", vox_usuario="", vox_clave="")
+                    db.session.add(cv)
+                    
                     db.session.commit()
-                msg = "✅ Usuario creado correctamente."
+                    
+                msg = "✅ Usuario y tablas de configuración creadas correctamente."
                 
         elif 'link_pc' in request.form:
             code_input = request.form.get('pairing_code', '').strip().upper()
@@ -202,12 +212,10 @@ def panel_estacion():
         is_loading = True
     return render_template('station_dashboard.html', user=current_user, btn_txt=btn_txt, is_loading=is_loading)
 
-# --- AQUÍ ESTÁ LA SOLUCIÓN AL ERROR 500 Y LA VINCULACIÓN ---
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
     msg = ""
-    # 1. Intentamos buscar si YA existe la fila en la tabla
     cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
 
     if request.method == 'POST':
@@ -216,32 +224,25 @@ def config_vox():
             u = request.form.get('u')
             p = request.form.get('p')
             
-            # 2. Si NO existe (es la primera vez), creamos la fila AQUÍ
+            # Autocorrección por si se creó manual o falló el alta
             if not cred: 
                 cred = CredencialVox(user_id=current_user.id)
                 db.session.add(cred) 
             
-            # 3. Guardamos los datos
             cred.vox_ip = ip
             cred.vox_usuario = u
             cred.vox_clave = p
             
-            # 4. Avisamos a la PC que hay datos nuevos (JSON Sync)
             current_user.status_conexion = 'pendiente'
             current_user.comando_pendiente = 'EXTRACT' 
             
-            # Aseguramos guardar tanto el usuario como la credencial
             db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado. Los datos se han vinculado y enviado a la PC."
+            msg = "✅ Guardado y enviado a PC."
         except Exception as e:
             db.session.rollback()
-            msg = f"❌ Error interno al guardar: {str(e)}"
+            msg = f"❌ Error: {str(e)}"
 
-    # 5. SOLUCIÓN FINAL AL ERROR 500:
-    # Si 'cred' sigue siendo None (porque es usuario nuevo y aun no guardó nada),
-    # creamos un objeto 'falso' temporal. Esto engaña al HTML para que no explote
-    # al intentar leer los campos vacíos.
     if not cred:
         cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
 
@@ -252,7 +253,7 @@ def config_vox():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-# --- APIS (Idénticas al original para mantener conexión con PC) ---
+# --- APIS ---
 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_poll():
