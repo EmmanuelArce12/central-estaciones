@@ -14,7 +14,6 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CONFIGURACIÓN ---
-# Detectar base de datos de Render (PostgreSQL) o usar local (SQLite)
 db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -30,7 +29,7 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# --- MODELOS (Base de Datos) ---
+# --- MODELOS ---
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -44,7 +43,6 @@ class User(UserMixin, db.Model):
     comando_pendiente = db.Column(db.String(50), nullable=True)
     last_check = db.Column(db.DateTime)
     
-    # Relaciones con cascade (Borrar usuario borra sus datos asociados)
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False, cascade="all, delete-orphan")
     reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
@@ -80,13 +78,12 @@ class Reporte(db.Model):
     turno = db.Column(db.String(20))
     hora_cierre = db.Column(db.DateTime)
 
-# --- INICIALIZACIÓN DE DB ---
+# --- INICIALIZACIÓN ---
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Tablas de base de datos verificadas.")
     except Exception as e:
-        print(f"⚠️ Advertencia DB Init: {e}")
+        print(f"Error DB: {e}")
 
 @login_manager.user_loader
 def load_user(uid): 
@@ -105,7 +102,7 @@ def procesar_fecha_turno(s):
     except: 
         return None, None, None
 
-# --- RUTAS WEB (Vistas) ---
+# --- VISTAS ---
 
 @app.route('/')
 def root():
@@ -153,6 +150,7 @@ def panel_superadmin():
                 nu.set_password(p)
                 db.session.add(nu)
                 db.session.commit()
+                # Creamos el Cliente, PERO NO las credenciales Vox todavía
                 if r == 'estacion':
                     nc = Cliente(nombre_fantasia=n, user_id=nu.id)
                     db.session.add(nc)
@@ -204,12 +202,12 @@ def panel_estacion():
         is_loading = True
     return render_template('station_dashboard.html', user=current_user, btn_txt=btn_txt, is_loading=is_loading)
 
-# --- CONFIGURACIÓN VOX (SOLUCIÓN ERROR 500) ---
+# --- AQUÍ ESTÁ LA SOLUCIÓN AL ERROR 500 Y LA VINCULACIÓN ---
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
     msg = ""
-    # 1. Buscamos las credenciales
+    # 1. Intentamos buscar si YA existe la fila en la tabla
     cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
 
     if request.method == 'POST':
@@ -218,30 +216,32 @@ def config_vox():
             u = request.form.get('u')
             p = request.form.get('p')
             
-            # Si no existen, creamos
+            # 2. Si NO existe (es la primera vez), creamos la fila AQUÍ
             if not cred: 
                 cred = CredencialVox(user_id=current_user.id)
                 db.session.add(cred) 
             
-            # Guardamos datos
+            # 3. Guardamos los datos
             cred.vox_ip = ip
             cred.vox_usuario = u
             cred.vox_clave = p
             
-            # IMPORTANTE: Mandar la orden a la PC
+            # 4. Avisamos a la PC que hay datos nuevos (JSON Sync)
             current_user.status_conexion = 'pendiente'
             current_user.comando_pendiente = 'EXTRACT' 
             
+            # Aseguramos guardar tanto el usuario como la credencial
             db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado. Enviando configuración a la PC..."
-            
+            msg = "✅ Guardado. Los datos se han vinculado y enviado a la PC."
         except Exception as e:
             db.session.rollback()
-            msg = f"❌ Error interno: {str(e)}"
+            msg = f"❌ Error interno al guardar: {str(e)}"
 
-    # 2. FIX CRITICO: Si cred es None (usuario nuevo), creamos un objeto 'fake'
-    # para que el HTML no de Error 500 al leer .vox_ip
+    # 5. SOLUCIÓN FINAL AL ERROR 500:
+    # Si 'cred' sigue siendo None (porque es usuario nuevo y aun no guardó nada),
+    # creamos un objeto 'falso' temporal. Esto engaña al HTML para que no explote
+    # al intentar leer los campos vacíos.
     if not cred:
         cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
 
@@ -252,7 +252,7 @@ def config_vox():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-# --- APIS (ORIGINALES - SIN CAMBIOS PARA QUE NO FALLE EL TOKEN) ---
+# --- APIS (Idénticas al original para mantener conexión con PC) ---
 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_poll():
