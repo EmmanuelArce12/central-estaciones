@@ -84,7 +84,7 @@ class Reporte(db.Model):
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Tablas de base de datos verificadas/creadas correctamente.")
+        print("✅ Tablas de base de datos verificadas.")
     except Exception as e:
         print(f"⚠️ Advertencia DB Init: {e}")
 
@@ -204,12 +204,12 @@ def panel_estacion():
         is_loading = True
     return render_template('station_dashboard.html', user=current_user, btn_txt=btn_txt, is_loading=is_loading)
 
-# --- ESTA ES LA ÚNICA FUNCIÓN MODIFICADA PARA ARREGLAR ERROR 500 Y ENVIAR DATOS A PC ---
+# --- CONFIGURACIÓN VOX (SOLUCIÓN ERROR 500) ---
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
     msg = ""
-    # Intentamos obtener credenciales existentes
+    # 1. Buscamos las credenciales
     cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
 
     if request.method == 'POST':
@@ -218,29 +218,30 @@ def config_vox():
             u = request.form.get('u')
             p = request.form.get('p')
             
-            # Si no existen, las creamos
+            # Si no existen, creamos
             if not cred: 
                 cred = CredencialVox(user_id=current_user.id)
                 db.session.add(cred) 
             
-            # Actualizamos datos
+            # Guardamos datos
             cred.vox_ip = ip
             cred.vox_usuario = u
             cred.vox_clave = p
             
-            # GATILLO: Ponemos estado en pendiente y comando EXTRACT
-            # Esto NO rompe el token, solo le dice a la PC que hay trabajo nuevo
+            # IMPORTANTE: Mandar la orden a la PC
             current_user.status_conexion = 'pendiente'
             current_user.comando_pendiente = 'EXTRACT' 
             
-            db.session.add(current_user) # Aseguramos guardar cambios en usuario tambien
+            db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado. Configuración enviada a la estación."
+            msg = "✅ Guardado. Enviando configuración a la PC..."
+            
         except Exception as e:
             db.session.rollback()
-            msg = f"❌ Error interno al guardar: {str(e)}"
+            msg = f"❌ Error interno: {str(e)}"
 
-    # SOLUCIÓN ERROR 500: Objeto temporal si no hay datos
+    # 2. FIX CRITICO: Si cred es None (usuario nuevo), creamos un objeto 'fake'
+    # para que el HTML no de Error 500 al leer .vox_ip
     if not cred:
         cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
 
@@ -251,7 +252,7 @@ def config_vox():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-# --- APIS (RESTAURADO EXACTAMENTE COMO EL ORIGINAL) ---
+# --- APIS (ORIGINALES - SIN CAMBIOS PARA QUE NO FALLE EL TOKEN) ---
 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_poll():
@@ -267,7 +268,6 @@ def handshake_poll():
         user.device_pairing_code = None 
         user.status_conexion = 'online'
         user.last_check = datetime.now()
-        # Lanzamos orden de extracción al vincular
         user.comando_pendiente = 'EXTRACT'
         
         db.session.commit()
@@ -281,20 +281,17 @@ def agent_sync():
     
     if not user: return jsonify({"status": "revoked"}), 401
     
-    # Optimización: Escribir en DB solo cada 60s
     ahora = datetime.now()
     if not user.last_check or (ahora - user.last_check).total_seconds() > 60:
         user.status_conexion = 'online'
         user.last_check = ahora
         db.session.commit()
     
-    # Revisar comandos pendientes
     cmd = user.comando_pendiente
     if cmd: 
         user.comando_pendiente = None
         db.session.commit()
     
-    # Enviar configuración actual
     conf = {}
     if user.credenciales_vox:
         conf = {
@@ -316,7 +313,6 @@ def rep():
         n = request.json
         nid = n.get('id_interno')
         
-        # Evitar duplicados
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
@@ -372,7 +368,6 @@ def admin_status_all():
     ahora = datetime.now()
     for u in users:
         estado = u.status_conexion
-        # Offline si no hay señal en 2 mins
         if u.last_check and (ahora - u.last_check).total_seconds() > 120: 
             estado = 'offline'
         
