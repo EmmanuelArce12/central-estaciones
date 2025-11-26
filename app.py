@@ -1,183 +1,377 @@
-import tkinter as tk
-from tkinter import messagebox, ttk
-import sys
 import os
-import json
-import requests
-import subprocess
-from bs4 import BeautifulSoup
+import secrets
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
-import threading
-import time
-import random
-import string
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
+
+app = Flask(__name__)
 
 # --- CONFIGURACIÓN ---
-URL_NUBE = "https://central-estaciones.onrender.com" # ⚠️ REEMPLAZA CON TU URL SI ES DISTINTA
-CONFIG_FILE = "config.json"
-BAT_FILE = "iniciar_servicio.bat"
+# Detectar base de datos de Render (PostgreSQL) o usar local (SQLite)
+db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
+if db_url and db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
 
-# ==========================================
-# 🕵️‍♂️ MODO SILENCIOSO (EL OBRERO)
-# ==========================================
-def obtener_config_nube(token):
-    try:
-        # Timeout corto para no bloquear si hay lag
-        res = requests.post(f"{URL_NUBE}/api/agent/sync", headers={'X-API-TOKEN': token}, timeout=10)
-        if res.status_code == 200:
-            return res.json()
-        elif res.status_code == 401:
-            return "REVOKED"
-    except: pass
-    return None
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'CLAVE_DEFAULT_SEGURA')
 
-def tarea_extraccion(token, config_vox):
-    ip = config_vox.get('ip')
-    user = config_vox.get('u')
-    pwd = config_vox.get('p')
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# --- MODELOS (Base de Datos) ---
+
+class User(UserMixin, db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), default='estacion', nullable=False)
+    api_token = db.Column(db.String(100), unique=True, nullable=True)
+    device_pairing_code = db.Column(db.String(20), nullable=True)
+    status_conexion = db.Column(db.String(20), default='offline')
+    comando_pendiente = db.Column(db.String(50), nullable=True)
+    last_check = db.Column(db.DateTime)
     
-    if not ip or not user: return 
+    # Relaciones con cascade (Borrar usuario borra sus datos asociados)
+    cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
+    credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False, cascade="all, delete-orphan")
+    reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
 
-    # Conexión VOX
-    base_url = f"http://{ip}/console"
-    session = requests.Session()
+    def set_password(self, p): self.password_hash = generate_password_hash(p)
+    def check_password(self, p): return check_password_hash(self.password_hash, p)
+    @property
+    def is_superadmin(self): return self.role == 'superadmin'
+
+class Cliente(db.Model):
+    __tablename__ = 'clientes'
+    id = db.Column(db.Integer, primary_key=True)
+    nombre_fantasia = db.Column(db.String(100))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
+
+class CredencialVox(db.Model):
+    __tablename__ = 'credenciales_vox'
+    id = db.Column(db.Integer, primary_key=True)
+    vox_ip = db.Column(db.String(50))
+    vox_usuario = db.Column(db.String(50))
+    vox_clave = db.Column(db.String(50))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
+
+class Reporte(db.Model):
+    __tablename__ = 'reportes'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    id_interno = db.Column(db.String(50))
+    estacion = db.Column(db.String(100))
+    fecha_completa = db.Column(db.String(100))
+    monto = db.Column(db.Float)
+    fecha_operativa = db.Column(db.String(20))
+    turno = db.Column(db.String(20))
+    hora_cierre = db.Column(db.DateTime)
+
+@login_manager.user_loader
+def load_user(uid): 
+    return User.query.get(int(uid))
+
+def procesar_fecha_turno(s):
+    # Lógica para convertir la fecha del reporte de Vox en Turno (Mañana/Tarde/Noche)
     try:
-        res = session.post(f"{base_url}/login/login/", data={'id_usuario': user, 'clave': pwd, 'autologin': '1', 'submit': 'Login'}, timeout=10)
-        if "id_usuario" in res.text: return 
-    except: return 
-
-    # Barrido
-    ahora = datetime.now()
-    periodos = [(ahora.month, ahora.year), ((ahora.replace(day=1)-timedelta(days=1)).month, (ahora.replace(day=1)-timedelta(days=1)).year)]
-    
-    for mes, anio in periodos:
-        try:
-            res = session.post(f"{base_url}/reports/sales/", data={'reportId':'reportSales','filterType':'T','month':mes,'year':anio})
-            soup = BeautifulSoup(res.text, 'html.parser')
-            select = soup.find('select', {'name': 'period'})
-            if select:
-                for op in [o for o in select.find_all('option') if o.get('value')]:
-                    tid, txt = op.get('value'), op.text.strip()
-                    if "Actual" in txt or f"/{mes:02d}/" not in txt: continue
-                    
-                    res_d = session.post(f"{base_url}/reportSales/", data={'reportId':'reportSales','filterType':'T','month':mes,'year':anio,'period':tid,'search':'Buscar'})
-                    monto = 0.0
-                    for tr in BeautifulSoup(res_d.text, 'html.parser').find_all('tr'):
-                        tds = tr.find_all('td')
-                        if len(tds)>=2 and tds[0].text.strip()=="Contado":
-                            try: monto=float(tds[1].text.strip().replace(".","").replace(",",".")); break
-                            except: pass
-                    
-                    if monto > 0:
-                        paquete = {"id_interno": tid, "estacion": "Agente", "monto": monto, "fecha": f"{anio}-{mes} ({txt})"}
-                        requests.post(f"{URL_NUBE}/api/reportar", json=paquete, headers={'X-API-TOKEN': token})
-        except: pass
-
-def bucle_servicio():
-    if not os.path.exists(CONFIG_FILE): return
-    try:
-        with open(CONFIG_FILE, 'r') as f: token = json.load(f).get('api_token')
-    except: return
-
-    if not token: return
-
-    while True:
-        data = obtener_config_nube(token)
-        
-        if data == "REVOKED":
-            os.remove(CONFIG_FILE)
-            sys.exit()
-            
-        if data and isinstance(data, dict):
-            comando = data.get('command')
-            config_vox = data.get('config')
-            
-            if comando == 'EXTRACT' and config_vox:
-                tarea_extraccion(token, config_vox)
-        
-        # Esperamos 10 segundos entre consultas para no saturar
-        time.sleep(10)
-
-# ==========================================
-# 📀 MODO INSTALADOR (GUI)
-# ==========================================
-class InstaladorApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Agente VOX")
-        self.root.geometry("400x350")
-        
-        self.codigo = tk.StringVar()
-        self.status = tk.StringVar(value="Generando código...")
-        
-        # UI
-        ttk.Label(root, text="VINCULACIÓN REQUERIDA", font=("Arial", 12, "bold"), foreground="red").pack(pady=20)
-        ttk.Label(root, text="Dale este código a tu Administrador:").pack()
-        
-        self.lbl_code = ttk.Label(root, textvariable=self.codigo, font=("Courier", 30, "bold"), background="#eee")
-        self.lbl_code.pack(pady=20, ipadx=10)
-        
-        self.lbl_code_note = ttk.Label(root, textvariable=self.status, foreground="blue")
-        self.lbl_code_note.pack(pady=10)
-        
-        # Iniciar proceso
-        self.generar_codigo()
-        threading.Thread(target=self.esperar_vinculacion, daemon=True).start()
-
-    def generar_codigo(self):
-        chars = string.ascii_uppercase + string.digits
-        code = ''.join(random.choices(chars, k=3)) + "-" + ''.join(random.choices(chars, k=2))
-        self.codigo.set(code)
-        self.status.set("Esperando autorización en la web...")
-
-    def instalar_persistencia(self):
-        # Crear .BAT y Tarea Programada
-        exe_path = os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)
-        with open(BAT_FILE, 'w') as f:
-            f.write(f'@echo off\ncd /d "{os.path.dirname(exe_path)}"\nstart "" "{exe_path}" --silent')
-
-        cmd = f'schtasks /create /tn "AgenteVOX_Service" /tr "\'{os.path.abspath(BAT_FILE)}\'" /sc daily /st 07:00 /f'
-        try: subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except: pass
-
-    def esperar_vinculacion(self):
-        while True:
-            try:
-                res = requests.post(f"{URL_NUBE}/api/handshake/poll", json={"code": self.codigo.get()})
-                data = res.json()
-                
-                if data.get('status') == 'linked':
-                    token = data.get('api_token')
-                    
-                    # Guardar
-                    with open(CONFIG_FILE, 'w') as f: json.dump({"api_token": token}, f)
-                    
-                    # Instalar persistencia
-                    self.instalar_persistencia()
-                    
-                    # Cambiar UI
-                    self.root.after(0, self.mostrar_exito)
-                    
-                    # Arrancar servicio
-                    threading.Thread(target=bucle_servicio, daemon=True).start()
-                    return
-            except: pass
-            time.sleep(3)
-
-    def mostrar_exito(self):
-        for widget in self.root.winfo_children(): widget.destroy()
-        ttk.Label(self.root, text="✅ SISTEMA ACTIVO", font=("Arial", 16, "bold"), foreground="green").pack(pady=40)
-        ttk.Label(self.root, text="Vinculación exitosa.", font=("Arial", 10)).pack()
-        ttk.Button(self.root, text="Minimizar", command=self.root.iconify).pack(pady=20)
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--silent":
-        bucle_servicio()
-    else:
-        # Si ya existe config, arrancar en modo silencioso o mostrar estado
-        if os.path.exists(CONFIG_FILE):
-             bucle_servicio() 
+        p = s.split(' - '); cr = p[1].replace(')', '').strip()
+        dt = datetime.strptime(cr, "%Y/%m/%d %H:%M:%S")
+        h=dt.hour; f=dt.date(); t="Noche"
+        if 6<=h<14: t="Mañana"
+        elif 14<=h<22: t="Tarde"
         else:
-            root = tk.Tk()
-            app = InstaladorApp(root)
-            root.mainloop()
+            if h<6: f=f-timedelta(days=1)
+        return f.strftime("%Y-%m-%d"), t, dt
+    except: 
+        return None, None, None
+
+# --- RUTAS WEB (Vistas) ---
+
+@app.route('/')
+def root():
+    if current_user.is_authenticated:
+        return redirect(url_for('panel_superadmin')) if current_user.is_superadmin else redirect(url_for('panel_estacion'))
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = ""
+    if request.method == 'POST':
+        u = request.form.get('username')
+        p = request.form.get('password')
+        user = User.query.filter_by(username=u).first()
+        if user and user.check_password(p):
+            login_user(user)
+            return redirect(url_for('root'))
+        else:
+            error = "Credenciales incorrectas."
+    return render_template('login.html', error=error)
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/admin/dashboard', methods=['GET', 'POST'])
+@login_required
+def panel_superadmin():
+    if not current_user.is_superadmin: return "Acceso Denegado"
+    msg = ""
+    
+    if request.method == 'POST':
+        if 'create_user' in request.form:
+            u = request.form.get('username')
+            p = request.form.get('password')
+            n = request.form.get('nombre')
+            r = request.form.get('role')
+            
+            if User.query.filter_by(username=u).first():
+                msg = "❌ El usuario ya existe."
+            else:
+                # Se crea usuario sin token, se generará al vincular
+                nu = User(username=u, role=r)
+                nu.set_password(p)
+                db.session.add(nu)
+                db.session.commit()
+                
+                if r == 'estacion':
+                    nc = Cliente(nombre_fantasia=n, user_id=nu.id)
+                    db.session.add(nc)
+                    db.session.commit()
+                msg = "✅ Usuario creado correctamente."
+                
+        elif 'link_pc' in request.form:
+            # Vinculación manual usando el código
+            code_input = request.form.get('pairing_code')
+            user_id = request.form.get('user_id')
+            user = User.query.get(user_id)
+            if user:
+                user.device_pairing_code = code_input
+                user.status_conexion = "waiting" 
+                db.session.commit()
+                msg = f"🔗 Esperando conexión con código: {code_input}"
+
+        elif 'revoke' in request.form:
+            # Desconectar PC
+            u = User.query.get(request.form.get('user_id'))
+            if u: 
+                u.api_token = None
+                u.status_conexion = "offline"
+                u.device_pairing_code = None
+                db.session.commit()
+                msg = "🚫 Vinculación revocada."
+
+    users = User.query.all()
+    return render_template('admin_dashboard.html', users=users, msg=msg)
+
+@app.route('/admin/eliminar-estacion/<int:id>', methods=['POST'])
+@login_required
+def eliminar_estacion(id):
+    if not current_user.is_superadmin: return "Acceso Denegado"
+    
+    user_to_delete = User.query.get_or_404(id)
+    
+    if user_to_delete.id == current_user.id:
+        return "No puedes borrarte a ti mismo."
+
+    try:
+        db.session.delete(user_to_delete)
+        db.session.commit()
+        return redirect(url_for('panel_superadmin'))
+    except Exception as e:
+        return f"Error al eliminar: {str(e)}"
+
+@app.route('/estacion/panel')
+@login_required
+def panel_estacion():
+    if current_user.is_superadmin: return redirect(url_for('panel_superadmin'))
+    
+    btn_txt = "⬇️ EXTRAER REPORTE AHORA"
+    is_loading = False
+    if current_user.comando_pendiente == 'EXTRACT': 
+        btn_txt = "⏳ Enviando orden..."
+        is_loading = True
+
+    return render_template('station_dashboard.html', 
+                           user=current_user, 
+                           btn_txt=btn_txt, 
+                           is_loading=is_loading)
+
+@app.route('/estacion/config-vox', methods=['GET', 'POST'])
+@login_required
+def config_vox():
+    msg = ""
+    if request.method == 'POST':
+        # --- CORRECCIÓN ERROR 500: Try/Except ---
+        try:
+            ip = request.form.get('ip')
+            u = request.form.get('u')
+            p = request.form.get('p')
+            
+            # Buscar credencial o crear nueva
+            c = CredencialVox.query.filter_by(user_id=current_user.id).first()
+            if not c: 
+                c = CredencialVox(user_id=current_user.id)
+                db.session.add(c) 
+            
+            c.vox_ip = ip
+            c.vox_usuario = u
+            c.vox_clave = p
+            
+            # Cambiar estado a pendiente
+            current_user.status_conexion = 'pendiente'
+            db.session.add(current_user)
+            
+            db.session.commit()
+            msg = "✅ Guardado. Esperando sincronización..."
+        except Exception as e:
+            db.session.rollback() # Deshacer cambios si falla
+            print(f"ERROR DB: {e}")
+            msg = f"❌ Error interno al guardar: {str(e)}"
+    
+    cred = current_user.credenciales_vox
+    return render_template('config_vox.html', cred=cred, msg=msg, user=current_user)
+
+@app.route('/estacion/ver-reportes')
+@login_required
+def ver_reportes_html():
+    return render_template('index.html', usuario=current_user.username)
+
+# --- APIS (Comunicación con el Cliente .EXE) ---
+
+@app.route('/api/handshake/poll', methods=['POST'])
+def handshake_poll():
+    # Paso 1: La PC envía el código
+    code = request.json.get('code')
+    user = User.query.filter_by(device_pairing_code=code).first()
+    
+    if user:
+        # Si el usuario existe, le generamos un token si no tiene
+        if not user.api_token:
+            user.api_token = secrets.token_hex(32)
+        
+        token_real = user.api_token
+        
+        # Limpiamos código y marcamos online
+        user.device_pairing_code = None 
+        user.status_conexion = 'online'
+        user.last_check = datetime.now()
+        db.session.commit()
+        
+        return jsonify({"status": "linked", "api_token": token_real}), 200
+        
+    return jsonify({"status": "waiting"}), 200
+
+@app.route('/api/agent/sync', methods=['POST'])
+def agent_sync():
+    # Paso 2: La PC envía heartbeat regularmente con el token
+    token = request.headers.get('X-API-TOKEN')
+    user = User.query.filter_by(api_token=token).first()
+    
+    if not user: return jsonify({"status": "revoked"}), 401
+    
+    # --- OPTIMIZACIÓN DE VELOCIDAD ---
+    # Solo escribimos en la DB si pasaron > 60 segundos
+    ahora = datetime.now()
+    if not user.last_check or (ahora - user.last_check).total_seconds() > 60:
+        user.status_conexion = 'online'
+        user.last_check = ahora
+        db.session.commit()
+    
+    # Revisar si hay comandos pendientes (Esto sí es inmediato)
+    cmd = user.comando_pendiente
+    if cmd: 
+        user.comando_pendiente = None
+        db.session.commit()
+    
+    # Enviar configuración actual
+    conf = {}
+    if user.credenciales_vox:
+        conf = {
+            "ip": user.credenciales_vox.vox_ip, 
+            "u": user.credenciales_vox.vox_usuario, 
+            "p": user.credenciales_vox.vox_clave
+        }
+        
+    return jsonify({"status": "ok", "command": cmd, "config": conf}), 200
+
+@app.route('/api/reportar', methods=['POST'])
+def rep():
+    # Recibe reportes extraídos
+    try:
+        tk = request.headers.get('X-API-TOKEN')
+        u = User.query.filter_by(api_token=tk).first()
+        
+        if not u: return jsonify({"status":"error"}), 401
+        
+        n = request.json
+        nid = n.get('id_interno')
+        
+        if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
+            return jsonify({"status":"ignorado"}), 200
+            
+        f,t,d = procesar_fecha_turno(n.get('fecha'))
+        
+        r = Reporte(
+            user_id=u.id, 
+            id_interno=nid, 
+            estacion=n.get('estacion'), 
+            fecha_completa=n.get('fecha'), 
+            monto=n.get('monto'), 
+            fecha_operativa=f, 
+            turno=t, 
+            hora_cierre=d
+        )
+        db.session.add(r)
+        db.session.commit()
+        return jsonify({"status":"exito"}), 200
+    except Exception as e:
+        return jsonify({"status":"error"}), 500
+
+@app.route('/api/ping-ui')
+@login_required
+def ping(): 
+    # API para que el panel web sepa si la PC está conectada
+    est = current_user.status_conexion
+    # Si hace más de 2 minutos no hay señal, marcar offline
+    if current_user.last_check and datetime.now() - current_user.last_check > timedelta(minutes=2):
+        est = 'offline'
+        
+    return jsonify({"st": est, "cmd": current_user.comando_pendiente == 'EXTRACT'})
+
+@app.route('/api/lanzar-orden', methods=['POST'])
+@login_required
+def lanzar():
+    current_user.comando_pendiente = 'EXTRACT'
+    db.session.commit()
+    return redirect(url_for('panel_estacion'))
+
+@app.route('/api/resumen-dia/<string:fecha>')
+@login_required
+def api_res(fecha):
+    reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
+    
+    res = {k: {"monto":0.0,"horario":"-","cierres":0} for k in ["Mañana","Tarde","Noche"]}
+    for r in reps:
+        if r.turno in res: 
+            res[r.turno]["monto"]+=r.monto
+            res[r.turno]["cierres"]+=1
+            
+    return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
+
+if __name__ == '__main__': 
+    app.run(host='0.0.0.0', port=10000)
