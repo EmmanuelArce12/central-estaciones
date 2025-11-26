@@ -44,7 +44,7 @@ class User(UserMixin, db.Model):
     comando_pendiente = db.Column(db.String(50), nullable=True)
     last_check = db.Column(db.DateTime)
     
-    # Relaciones con cascade (Borrar usuario borra sus datos asociados)
+    # Relaciones con cascade
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False, cascade="all, delete-orphan")
     reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
@@ -85,7 +85,6 @@ def load_user(uid):
     return User.query.get(int(uid))
 
 def procesar_fecha_turno(s):
-    # Lógica para convertir la fecha del reporte de Vox en Turno (Mañana/Tarde/Noche)
     try:
         p = s.split(' - '); cr = p[1].replace(')', '').strip()
         dt = datetime.strptime(cr, "%Y/%m/%d %H:%M:%S")
@@ -97,6 +96,11 @@ def procesar_fecha_turno(s):
         return f.strftime("%Y-%m-%d"), t, dt
     except: 
         return None, None, None
+
+# --- ¡CORRECCIÓN CRÍTICA! ---
+# Esto fuerza la creación de tablas al iniciar la APP, no solo al ejecutar el script.
+with app.app_context():
+    db.create_all()
 
 # --- RUTAS WEB (Vistas) ---
 
@@ -142,12 +146,10 @@ def panel_superadmin():
             if User.query.filter_by(username=u).first():
                 msg = "❌ El usuario ya existe."
             else:
-                # Se crea usuario sin token, se generará al vincular
                 nu = User(username=u, role=r)
                 nu.set_password(p)
                 db.session.add(nu)
                 db.session.commit()
-                
                 if r == 'estacion':
                     nc = Cliente(nombre_fantasia=n, user_id=nu.id)
                     db.session.add(nc)
@@ -155,18 +157,16 @@ def panel_superadmin():
                 msg = "✅ Usuario creado correctamente."
                 
         elif 'link_pc' in request.form:
-            # Vinculación manual usando el código
-            code_input = request.form.get('pairing_code')
+            code_input = request.form.get('pairing_code', '').strip().upper()
             user_id = request.form.get('user_id')
             user = User.query.get(user_id)
-            if user:
+            if user and code_input:
                 user.device_pairing_code = code_input
                 user.status_conexion = "waiting" 
                 db.session.commit()
                 msg = f"🔗 Esperando conexión con código: {code_input}"
 
         elif 'revoke' in request.form:
-            # Desconectar PC
             u = User.query.get(request.form.get('user_id'))
             if u: 
                 u.api_token = None
@@ -182,47 +182,43 @@ def panel_superadmin():
 @login_required
 def eliminar_estacion(id):
     if not current_user.is_superadmin: return "Acceso Denegado"
-    
     user_to_delete = User.query.get_or_404(id)
-    
-    if user_to_delete.id == current_user.id:
-        return "No puedes borrarte a ti mismo."
-
+    if user_to_delete.id == current_user.id: return "No puedes borrarte a ti mismo."
     try:
         db.session.delete(user_to_delete)
         db.session.commit()
         return redirect(url_for('panel_superadmin'))
-    except Exception as e:
-        return f"Error al eliminar: {str(e)}"
+    except Exception as e: return f"Error: {str(e)}"
 
 @app.route('/estacion/panel')
 @login_required
 def panel_estacion():
     if current_user.is_superadmin: return redirect(url_for('panel_superadmin'))
-    
     btn_txt = "⬇️ EXTRAER REPORTE AHORA"
     is_loading = False
     if current_user.comando_pendiente == 'EXTRACT': 
         btn_txt = "⏳ Enviando orden..."
         is_loading = True
-
-    return render_template('station_dashboard.html', 
-                           user=current_user, 
-                           btn_txt=btn_txt, 
-                           is_loading=is_loading)
+    return render_template('station_dashboard.html', user=current_user, btn_txt=btn_txt, is_loading=is_loading)
 
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
     msg = ""
+    # Intentamos acceder a la relación para ver si no explota (debug)
+    try:
+        cred = current_user.credenciales_vox
+    except Exception as e:
+        # Si falla al leer, es probable que la tabla no exista, intentamos crearla de emergencia
+        with app.app_context(): db.create_all()
+        cred = None
+
     if request.method == 'POST':
-        # --- CORRECCIÓN ERROR 500: Try/Except ---
         try:
             ip = request.form.get('ip')
             u = request.form.get('u')
             p = request.form.get('p')
             
-            # Buscar credencial o crear nueva
             c = CredencialVox.query.filter_by(user_id=current_user.id).first()
             if not c: 
                 c = CredencialVox(user_id=current_user.id)
@@ -232,21 +228,18 @@ def config_vox():
             c.vox_usuario = u
             c.vox_clave = p
             
-            # 1. Cambiar estado a pendiente
             current_user.status_conexion = 'pendiente'
-            
-            # 2. AUTOMÁTICO: Ordenar extracción al guardar configuración para probarla
             current_user.comando_pendiente = 'EXTRACT' 
             
             db.session.add(current_user)
             db.session.commit()
             msg = "✅ Guardado. Se ha ordenado una extracción automática..."
+            # Refrescamos la variable cred para que se vea en el form
+            cred = c
         except Exception as e:
-            db.session.rollback() # Deshacer cambios si falla
-            print(f"ERROR DB: {e}")
+            db.session.rollback()
             msg = f"❌ Error interno al guardar: {str(e)}"
     
-    cred = current_user.credenciales_vox
     return render_template('config_vox.html', cred=cred, msg=msg, user=current_user)
 
 @app.route('/estacion/ver-reportes')
@@ -254,112 +247,67 @@ def config_vox():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-# --- APIS (Comunicación con el Cliente .EXE) ---
+# --- APIS ---
 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_poll():
-    # Paso 1: La PC envía el código
-    code = request.json.get('code')
+    code_raw = request.json.get('code', '')
+    if not code_raw: return jsonify({"status": "waiting"}), 200
+    code = code_raw.strip().upper()
     user = User.query.filter_by(device_pairing_code=code).first()
-    
     if user:
-        # Si el usuario existe, le generamos un token si no tiene
-        if not user.api_token:
-            user.api_token = secrets.token_hex(32)
-        
+        if not user.api_token: user.api_token = secrets.token_hex(32)
         token_real = user.api_token
-        
-        # Limpiamos código y marcamos online
         user.device_pairing_code = None 
         user.status_conexion = 'online'
         user.last_check = datetime.now()
-        
-        # AUTOMÁTICO: Ordenar extracción inmediata al vincular por primera vez
         user.comando_pendiente = 'EXTRACT'
-        
         db.session.commit()
-        
         return jsonify({"status": "linked", "api_token": token_real}), 200
-        
     return jsonify({"status": "waiting"}), 200
 
 @app.route('/api/agent/sync', methods=['POST'])
 def agent_sync():
-    # Paso 2: La PC envía heartbeat regularmente con el token
     token = request.headers.get('X-API-TOKEN')
     user = User.query.filter_by(api_token=token).first()
-    
     if not user: return jsonify({"status": "revoked"}), 401
-    
-    # --- OPTIMIZACIÓN DE VELOCIDAD ---
-    # Solo escribimos en la DB si pasaron > 60 segundos
     ahora = datetime.now()
     if not user.last_check or (ahora - user.last_check).total_seconds() > 60:
         user.status_conexion = 'online'
         user.last_check = ahora
         db.session.commit()
-    
-    # Revisar si hay comandos pendientes (Esto sí es inmediato)
     cmd = user.comando_pendiente
     if cmd: 
         user.comando_pendiente = None
         db.session.commit()
-    
-    # Enviar configuración actual (Aquí conecta Vox con el Script)
     conf = {}
     if user.credenciales_vox:
-        conf = {
-            "ip": user.credenciales_vox.vox_ip, 
-            "u": user.credenciales_vox.vox_usuario, 
-            "p": user.credenciales_vox.vox_clave
-        }
-        
+        conf = {"ip": user.credenciales_vox.vox_ip, "u": user.credenciales_vox.vox_usuario, "p": user.credenciales_vox.vox_clave}
     return jsonify({"status": "ok", "command": cmd, "config": conf}), 200
 
 @app.route('/api/reportar', methods=['POST'])
 def rep():
-    # Recibe reportes extraídos desde el script
     try:
         tk = request.headers.get('X-API-TOKEN')
         u = User.query.filter_by(api_token=tk).first()
-        
         if not u: return jsonify({"status":"error"}), 401
-        
         n = request.json
         nid = n.get('id_interno')
-        
-        # Evitamos guardar duplicados
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
-            
         f,t,d = procesar_fecha_turno(n.get('fecha'))
-        
-        # Guardamos vinculado al usuario (Conectando reporte a la visualización)
-        r = Reporte(
-            user_id=u.id, 
-            id_interno=nid, 
-            estacion=n.get('estacion'), 
-            fecha_completa=n.get('fecha'), 
-            monto=n.get('monto'), 
-            fecha_operativa=f, 
-            turno=t, 
-            hora_cierre=d
-        )
+        r = Reporte(user_id=u.id, id_interno=nid, estacion=n.get('estacion'), fecha_completa=n.get('fecha'), monto=n.get('monto'), fecha_operativa=f, turno=t, hora_cierre=d)
         db.session.add(r)
         db.session.commit()
         return jsonify({"status":"exito"}), 200
-    except Exception as e:
-        return jsonify({"status":"error"}), 500
+    except: return jsonify({"status":"error"}), 500
 
 @app.route('/api/ping-ui')
 @login_required
 def ping(): 
-    # API para que el panel web sepa si la PC está conectada
     est = current_user.status_conexion
-    # Si hace más de 2 minutos no hay señal, marcar offline
     if current_user.last_check and datetime.now() - current_user.last_check > timedelta(minutes=2):
         est = 'offline'
-        
     return jsonify({"st": est, "cmd": current_user.comando_pendiente == 'EXTRACT'})
 
 @app.route('/api/lanzar-orden', methods=['POST'])
@@ -372,48 +320,28 @@ def lanzar():
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
-    # Visualización: Filtra SOLO reportes del usuario actual
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
-    
     res = {k: {"monto":0.0,"horario":"-","cierres":0} for k in ["Mañana","Tarde","Noche"]}
     for r in reps:
         if r.turno in res: 
             res[r.turno]["monto"]+=r.monto
             res[r.turno]["cierres"]+=1
-            
     return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
-# --- NUEVA RUTA PARA ACTUALIZAR EL DASHBOARD EN VIVO ---
+
 @app.route('/admin/api/status-all')
 @login_required
 def admin_status_all():
     if not current_user.is_superadmin: return jsonify([])
-    
     users = User.query.all()
     data = []
     ahora = datetime.now()
-    
     for u in users:
-        # Lógica de estado
         estado = u.status_conexion
-        
-        # Si dice online pero hace 2 mins no habla, es offline
-        if u.last_check and (ahora - u.last_check).total_seconds() > 120:
-            estado = 'offline'
-        
-        # Formatear fecha
+        if u.last_check and (ahora - u.last_check).total_seconds() > 120: estado = 'offline'
         fecha = "Nunca"
-        if u.last_check:
-            fecha = u.last_check.strftime('%d/%m %H:%M:%S')
-
-        data.append({
-            "id": u.id,
-            "status": estado,
-            "code": u.device_pairing_code,
-            "last_check": fecha
-        })
+        if u.last_check: fecha = u.last_check.strftime('%d/%m %H:%M:%S')
+        data.append({"id": u.id, "status": estado, "code": u.device_pairing_code, "last_check": fecha})
     return jsonify(data)
 
 if __name__ == '__main__': 
-    with app.app_context():
-        db.create_all() # <--- ¡ESTO ARREGLA EL ERROR 500 AL CONFIGURAR VOX!
     app.run(host='0.0.0.0', port=10000)
