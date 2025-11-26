@@ -2,47 +2,46 @@ import os
 import secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
+from flask_migrate import Migrate  # <--- GESTOR DE DB
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
+from dotenv import load_dotenv 
+
+# Cargar variables de entorno (.env)
+load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN DB ---
+# --- CONFIGURACIÓN ---
 db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'CLAVE_SUPER_SECRETA_PRODUCCION'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'CLAVE_DEFAULT_SEGURA')
 
 db = SQLAlchemy(app)
-migrate = Migrate(app, db)
+migrate = Migrate(app, db) # <--- INICIALIZAR MIGRACIONES
 
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# --- MODELOS ---
-
+# --- MODELOS (Tus Tablas) ---
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
-    
-    # Token Único para el Agente .EXE
     api_token = db.Column(db.String(100), unique=True, nullable=True)
-    
-    # Estado de la conexión del Agente
+    device_pairing_code = db.Column(db.String(20), nullable=True)
     status_conexion = db.Column(db.String(20), default='offline')
-    comando_pendiente = db.Column(db.String(50), nullable=True) # Ej: 'EXTRACT'
+    comando_pendiente = db.Column(db.String(50), nullable=True)
     last_check = db.Column(db.DateTime)
     
-    # Relaciones
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False)
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False)
     reportes = db.relationship('Reporte', backref='usuario', lazy=True)
@@ -77,7 +76,6 @@ class Reporte(db.Model):
     fecha_operativa = db.Column(db.String(20))
     turno = db.Column(db.String(20))
     hora_cierre = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 @login_manager.user_loader
 def load_user(uid): return User.query.get(int(uid))
@@ -94,7 +92,7 @@ def procesar_fecha_turno(s):
         return f.strftime("%Y-%m-%d"), t, dt
     except: return None,None,None
 
-# --- RUTAS DE NAVEGACIÓN ---
+# --- RUTAS WEB (Controladores) ---
 
 @app.route('/')
 def root():
@@ -106,15 +104,21 @@ def root():
 def login():
     error = ""
     if request.method == 'POST':
-        u = request.form.get('username'); p = request.form.get('password')
+        u = request.form.get('username')
+        p = request.form.get('password')
         user = User.query.filter_by(username=u).first()
-        if user and user.check_password(p): login_user(user); return redirect(url_for('root'))
-        else: error = "Credenciales incorrectas."
-    return f"""<style>body{{font-family:sans-serif;background:#eef2f3;display:flex;justify-content:center;align-items:center;height:100vh}}form{{background:white;padding:40px;border-radius:15px;box-shadow:0 10px 25px #00000010;width:300px;text-align:center}}input{{width:100%;padding:12px;margin:10px 0;border:1px solid #ccc;border-radius:8px}}button{{width:100%;padding:12px;background:#007bff;color:white;border:none;border-radius:8px;cursor:pointer}}</style><form method="POST"><h2>🔒 Portal</h2><input name="username" placeholder="User" required><input type="password" name="password" placeholder="Pass" required><button>Entrar</button><p style="color:red">{error}</p></form>"""
+        if user and user.check_password(p):
+            login_user(user)
+            return redirect(url_for('root'))
+        else:
+            error = "Credenciales incorrectas."
+    return render_template('login.html', error=error)
 
 @app.route('/logout')
 @login_required
-def logout(): logout_user(); return redirect(url_for('login'))
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
 @app.route('/admin/dashboard', methods=['GET', 'POST'])
 @login_required
@@ -122,63 +126,43 @@ def panel_superadmin():
     if not current_user.is_superadmin: return "Acceso Denegado"
     msg = ""
     
-    # CREAR USUARIO CON TOKEN
-    if request.method == 'POST' and 'create_user' in request.form:
-        u = request.form.get('username'); p = request.form.get('password'); n = request.form.get('nombre'); r = request.form.get('role')
-        if User.query.filter_by(username=u).first(): msg = "❌ Existe."
-        else:
-            # Generamos Token Fijo al crear
-            token_nuevo = "TK-" + secrets.token_hex(6)
-            nu = User(username=u, role=r, api_token=token_nuevo); nu.set_password(p); db.session.add(nu); db.session.commit()
-            if r == 'estacion': nc = Cliente(nombre_fantasia=n, user_id=nu.id); db.session.add(nc); db.session.commit()
-            msg = f"✅ Creado. Token: {token_nuevo}"
+    # Lógica POST (Crear, Vincular, Revocar)
+    if request.method == 'POST':
+        if 'create_user' in request.form:
+            u = request.form.get('username'); p = request.form.get('password'); n = request.form.get('nombre'); r = request.form.get('role')
+            if User.query.filter_by(username=u).first(): msg = "❌ Existe."
+            else:
+                nu = User(username=u, role=r); nu.set_password(p); db.session.add(nu); db.session.commit()
+                if r == 'estacion': nc = Cliente(nombre_fantasia=n, user_id=nu.id); db.session.add(nc); db.session.commit()
+                msg = "✅ Creado."
+        elif 'link_pc' in request.form:
+            # Lógica de vinculación manual (Opcional si usas el EXE auto)
+            pass 
+        elif 'revoke' in request.form:
+            u = User.query.get(request.form.get('user_id'))
+            if u: 
+                u.api_token = None; u.status_conexion = "offline"; u.device_pairing_code = None
+                db.session.commit()
+                msg = "🚫 Revocado."
 
-    users = User.query.all(); l = ""
-    for u in users:
-        if u.role == 'superadmin': continue
-        st = "🟢 Online" if u.status_conexion=='online' else "🔴 Offline"
-        nom = u.cliente_info.nombre_fantasia if u.cliente_info else "-"
-        l += f"<li style='padding:10px;border-bottom:1px solid #eee;background:white;margin:5px;border-radius:5px'><b>{u.username}</b> ({nom})<br><small>Token: {u.api_token}</small><div style='float:right'>{st}</div></li>"
-
-    return f"""<style>body{{font-family:sans-serif;padding:30px;background:#f4f7f6;max-width:800px;margin:0 auto}}.card{{background:white;padding:20px;border-radius:10px;margin-bottom:20px}}input,select{{padding:5px;margin:5px}}button{{padding:5px 15px;background:green;color:white;border:none;border-radius:5px;cursor:pointer}}</style><a href="/logout" style="float:right">Salir</a><h1>SuperAdmin</h1><p style="color:blue">{msg}</p><div class="card"><h3>➕ Nueva Estación</h3><form method="POST"><input type="hidden" name="create_user" value="1"><input name="username" placeholder="Usuario" required><input name="password" placeholder="Clave"><input name="nombre" placeholder="Fantasia"><select name="role"><option value="estacion">Estación</option></select><button>Crear</button></form></div><div class="card"><h3>📡 Gestión</h3><ul style="list-style:none;padding:0">{l}</ul></div>"""
+    users = User.query.all()
+    return render_template('admin_dashboard.html', users=users, msg=msg)
 
 @app.route('/estacion/panel')
 @login_required
 def panel_estacion():
     if current_user.is_superadmin: return redirect(url_for('panel_superadmin'))
     
-    # Botón de extracción manual
-    btn_txt = "⬇️ FORZAR EXTRACCIÓN AHORA"
-    btn_style = "background:#007bff"
+    btn_txt = "⬇️ EXTRAER REPORTE AHORA"
+    is_loading = False
     if current_user.comando_pendiente == 'EXTRACT': 
         btn_txt = "⏳ Enviando orden..."
-        btn_style = "background:gray;cursor:wait"
+        is_loading = True
 
-    st = current_user.status_conexion
-    icon = "🟢 Conectado" if st=='online' else "🔴 Desconectado"
-    cls = "ok" if st=='online' else "err"
-
-    return f"""
-    <style>body{{font-family:sans-serif;background:#f0f2f5;padding:20px;text-align:center}}.btn{{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005}}.tag{{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}}.ok{{background:#d4edda;color:green}}.err{{background:#f8d7da;color:red}}.act{{color:white;font-weight:bold;text-align:center}}</style>
-    <script>setInterval(()=>{{fetch('/api/ping-ui').then(r=>r.json()).then(d=>{{if(d.st!=='{st}'||d.cmd!=={( 'true' if current_user.comando_pendiente else 'false' )})location.reload()}})}},3000)</script>
-    <div style="max-width:600px;margin:0 auto">
-        <h1>Hola, {current_user.username}</h1>
-        <p>Estado PC: <span class="tag {cls}">{icon}</span></p>
-        
-        <div style="background:#333;color:white;padding:10px;border-radius:5px;margin-bottom:20px;font-family:monospace">
-            TOKEN INSTALADOR: <b>{current_user.api_token}</b>
-        </div>
-        
-        <a href="/estacion/config-vox" class="btn">⚙️ Configurar Credenciales VOX</a>
-        
-        <form method="POST" action="/api/lanzar-orden">
-            <button class="btn act" style="{btn_style}">{btn_txt}</button>
-        </form>
-
-        <a href="/estacion/ver-reportes" class="btn">📊 Ver Gráficos</a>
-        <br><a href="/logout">Salir</a>
-    </div>
-    """
+    return render_template('station_dashboard.html', 
+                           user=current_user, 
+                           btn_txt=btn_txt, 
+                           is_loading=is_loading)
 
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
@@ -186,47 +170,47 @@ def config_vox():
     msg = ""
     if request.method == 'POST':
         ip = request.form.get('ip'); u = request.form.get('u'); p = request.form.get('p')
-        
         c = CredencialVox.query.filter_by(user_id=current_user.id).first()
         if not c: c = CredencialVox(user_id=current_user.id)
-        
         c.vox_ip = ip; c.vox_usuario = u; c.vox_clave = p
+        current_user.status_conexion = 'pendiente'
         db.session.add(c); db.session.commit()
-        msg = "✅ Guardado. El agente recibirá estos datos en breve."
+        msg = "✅ Guardado. Esperando conexión..."
     
-    c = current_user.credenciales_vox
-    val_ip = c.vox_ip if c else "10.6.235.229"
-    val_u = c.vox_usuario if c else ""; val_p = c.vox_clave if c else ""
-    
-    return f"""<style>body{{font-family:sans-serif;padding:40px;text-align:center}}input{{display:block;width:300px;margin:10px auto;padding:10px}}button{{padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px}}</style><h1>Configurar VOX</h1><form method="POST"><label>IP Local</label><input name="ip" value="{val_ip}"><label>Usuario VOX</label><input name="u" value="{val_u}"><label>Clave VOX</label><input type="password" name="p" value="{val_p}"><button>Guardar</button></form><p style="color:green">{msg}</p><br><a href="/">Volver</a>"""
+    cred = current_user.credenciales_vox
+    return render_template('config_vox.html', cred=cred, msg=msg, user=current_user)
 
 @app.route('/estacion/ver-reportes')
 @login_required
-def ver_reportes_html(): return render_template('index.html', usuario=current_user.username)
+def ver_reportes_html():
+    return render_template('index.html', usuario=current_user.username)
 
-# --- APIS PARA EL AGENTE ---
+# --- APIS (Sin cambios, siguen devolviendo JSON para el EXE y AJAX) ---
+@app.route('/api/handshake/poll', methods=['POST'])
+def handshake_poll():
+    code = request.json.get('code')
+    user = User.query.filter_by(device_pairing_code=code).first()
+    if user and user.api_token:
+        token_real = user.api_token
+        user.device_pairing_code = None 
+        user.status_conexion = 'online'
+        user.last_check = datetime.now()
+        db.session.commit()
+        return jsonify({"status": "linked", "api_token": token_real}), 200
+    return jsonify({"status": "waiting"}), 200
 
 @app.route('/api/agent/sync', methods=['POST'])
 def agent_sync():
     token = request.headers.get('X-API-TOKEN')
     user = User.query.filter_by(api_token=token).first()
-    
     if not user: return jsonify({"status": "revoked"}), 401
-    
-    # Heartbeat
-    user.status_conexion = 'online'
-    user.last_check = datetime.now()
-    
-    # Comandos
+    user.status_conexion = 'online'; user.last_check = datetime.now()
     cmd = user.comando_pendiente
     if cmd: user.comando_pendiente = None
     db.session.commit()
-    
-    # Config VOX para entregar al agente
     conf = {}
     if user.credenciales_vox:
         conf = {"ip": user.credenciales_vox.vox_ip, "u": user.credenciales_vox.vox_usuario, "p": user.credenciales_vox.vox_clave}
-
     return jsonify({"status": "ok", "command": cmd, "config": conf}), 200
 
 @app.route('/api/reportar', methods=['POST'])
@@ -242,7 +226,6 @@ def rep():
         return jsonify({"status":"exito"}),200
     except Exception as e: return jsonify({"status":"error"}),500
 
-# API UI
 @app.route('/api/ping-ui')
 @login_required
 def ping(): return jsonify({"st": current_user.status_conexion, "cmd": current_user.comando_pendiente == 'EXTRACT'})
@@ -263,13 +246,4 @@ def api_res(fecha):
         if r.turno in res: res[r.turno]["monto"]+=r.monto; res[r.turno]["cierres"]+=1
     return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
 
-def auto_setup():
-    try:
-        with app.app_context():
-            db.create_all()
-            if not User.query.filter_by(username='admin').first():
-                a = User(username='admin', role='superadmin', api_token='MASTER'); a.set_password('admin123'); db.session.add(a); db.session.commit()
-    except: pass
-auto_setup()
-
-if __name__ == '__main__': app.run(host='0.0.0.0', port=10000)
+if __name__ == '__main__': app.run(host='0.0.0.0', port=10000)flask db init

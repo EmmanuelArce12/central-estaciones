@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin</title>
+    <style>
+        body{font-family:sans-serif;padding:30px;background:#f4f7f6;max-width:800px;margin:0 auto}
+        .card{background:white;padding:20px;border-radius:10px;box-shadow:0 2px 5px #00000010;margin-bottom:20px}
+        input,select{padding:8px;margin:5px;border:1px solid #ddd;border-radius:4px}
+        button{padding:8px 15px;background:green;color:white;border:none;border-radius:5px;cursor:pointer}
+        .online{color:green} .offline{color:red}
+        ul{list-style:none;padding:0}
+        li{padding:10px;border-bottom:1px solid #eee;background:white;margin:5px;border-radius:5px}
+    </style>
+</head>
+<body>
+    <a href="/logout" style="float:right;color:red;text-decoration:none">Cerrar Sesión</a>
+    <h1>👑 Panel SuperAdmin</h1>
+    
+    {% if msg %} <p style="color:blue;font-weight:bold">{{ msg }}</p> {% endif %}
+
+    <div class="card">
+        <h3>➕ Nueva Estación</h3>
+        <form method="POST">
+            <input type="hidden" name="create_user" value="1">
+            <input name="username" placeholder="Usuario Login" required>
+            <input name="password" placeholder="Clave" required>
+            <input name="nombre" placeholder="Nombre Fantasia">
+            <select name="role">
+                <option value="estacion">Estación</option>
+                <option value="superadmin">Admin</option>
+            </select>
+            <button>Crear</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>📡 Gestión de Estaciones</h3>
+        <ul>
+            {% for u in users %}
+                {% if u.role != 'superadmin' %}
+                <li>
+                    <b>{{ u.username }}</b> ({{ u.cliente_info.nombre_fantasia if u.cliente_info else '-' }})
+                    - <span class="{{ 'online' if u.status_conexion=='online' else 'offline' }}">
+                        {{ '🟢 Online' if u.status_conexion=='online' else '🔴 Offline' }}
+                    </span>
+                    {% if u.api_token %}
+                    <form method="POST" style="display:inline;float:right">
+                        <input type="hidden" name="revoke" value="1">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <button style="background:#dc3545;padding:4px 8px;font-size:0.8rem">Revocar</button>
+                    </form>
+                    {% else %}
+                    <form method="POST" style="display:inline;float:right">
+                        <input type="hidden" name="link_pc" value="1">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <input name="code" placeholder="Código EXE" size="8" required>
+                        <button style="background:#6c5ce7;padding:4px 8px;font-size:0.8rem">Vincular</button>
+                    </form>
+                    {% endif %}
+                </li>
+                {% endif %}
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

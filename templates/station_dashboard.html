@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel Estación</title>
+    <style>
+        body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;padding:20px;text-align:center}
+        .container{max-width:600px;margin:0 auto}
+        .btn{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005;cursor:pointer}
+        .btn:hover{transform:translateY(-2px)}
+        .tag{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}
+        .ok{background:#d4edda;color:green} .err{background:#f8d7da;color:red}
+        .act{background:#007bff;color:white;font-weight:bold;text-align:center}
+    </style>
+    <script>
+        setInterval(() => {
+            fetch('/api/ping-ui').then(r=>r.json()).then(d=>{
+                if(d.st !== '{{ user.status_conexion }}' || d.cmd !== {{ 'true' if user.comando_pendiente else 'false' }}) 
+                    location.reload();
+            })
+        }, 3000);
+    </script>
+</head>
+<body>
+    <div class="container">
+        <a href="/logout" style="float:right;color:#c0392b;text-decoration:none">Salir</a>
+        <h1>Hola, {{ user.cliente_info.nombre_fantasia if user.cliente_info else user.username }}</h1>
+        
+        <p>Estado PC: 
+            <span class="tag {{ 'ok' if user.status_conexion=='online' else 'err' }}">
+                {{ '🟢 Conectado' if user.status_conexion=='online' else '🔴 Desconectado' }}
+            </span>
+        </p>
+
+        <a href="/estacion/config-vox" class="btn">⚙️ Configurar Credenciales VOX</a>
+        
+        <form method="POST" action="/api/lanzar-orden">
+            <button class="btn act" {% if is_loading %}disabled style="background:gray;cursor:wait"{% endif %}>
+                {{ btn_txt }}
+            </button>
+        </form>
+
+        <a href="/estacion/ver-reportes" class="btn">📊 Ver Gráficos y Reportes</a>
+    </div>
+</body>
+</html>
