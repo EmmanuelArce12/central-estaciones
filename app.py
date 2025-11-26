@@ -80,10 +80,14 @@ class Reporte(db.Model):
     turno = db.Column(db.String(20))
     hora_cierre = db.Column(db.DateTime)
 
-# --- INICIALIZACIÓN DE DB ---
-# Esto asegura que las tablas existan siempre, arreglando el Error 500
+# --- INICIALIZACIÓN DE DB (CRÍTICO PARA RENDER) ---
+# Ejecutamos esto en el contexto global para asegurar que las tablas existan al arrancar Gunicorn
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+        print("✅ Tablas de base de datos verificadas/creadas correctamente.")
+    except Exception as e:
+        print(f"⚠️ Advertencia DB Init: {e}")
 
 @login_manager.user_loader
 def load_user(uid): 
@@ -207,11 +211,12 @@ def panel_estacion():
 @login_required
 def config_vox():
     msg = ""
-    # BLINDAJE PARA EVITAR ERROR 500
+    # BLINDAJE PARA EVITAR ERROR 500 (ProgrammingError si tabla no existe)
     try:
         cred = current_user.credenciales_vox
     except Exception as e:
-        # Si falla, aseguramos que la tabla exista
+        print(f"Error leyendo credenciales (posible tabla faltante): {e}")
+        # Intento de emergencia para crear tabla si falló el init global
         with app.app_context(): db.create_all()
         cred = None
 
