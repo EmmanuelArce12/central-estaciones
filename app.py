@@ -246,7 +246,7 @@ def config_vox():
     if not cred:
         cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
 
-    return render_template('config_vox.html', cred=cred, msg=msg, user=current_user)
+    return render_template('configurar_vox.html', cred=cred, msg=msg, user=current_user)
 
 @app.route('/estacion/ver-reportes')
 @login_required
