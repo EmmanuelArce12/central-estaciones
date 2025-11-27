@@ -3,19 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Resumen Gerencial VOX</title>
+    <title>Reportes - {{ usuario }}</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; padding: 20px; max-width: 900px; margin: 0 auto; }
-        h1 { text-align: center; color: #2c3e50; }
         
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; }
+        h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
+        
+        .btn-back {
+            text-decoration: none; background-color: #6c757d; color: white; 
+            padding: 8px 15px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;
+        }
+        .btn-back:hover { background-color: #5a6268; }
+
         .search-box {
             background: white; padding: 20px; border-radius: 12px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.05);
             display: flex; justify-content: center; gap: 15px; margin-bottom: 30px;
         }
         input[type="date"] { padding: 10px; font-size: 1.1rem; border-radius: 6px; border: 1px solid #ccc; }
-        button { padding: 10px 25px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
-        button:hover { background: #3498db; }
+        button.btn-search { padding: 10px 25px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+        button.btn-search:hover { background: #3498db; }
 
         /* Contenedor de Tarjetas */
         .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
@@ -24,7 +32,9 @@
             background: white; border-radius: 12px; padding: 20px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; overflow: hidden;
             border-top: 5px solid #ccc;
+            animation: fadeIn 0.5s ease-in-out;
         }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
         /* Colores por Turno */
         .card.Mañana { border-top-color: #f1c40f; } /* Amarillo */
@@ -37,22 +47,26 @@
         .monto-grande { font-size: 2rem; font-weight: bold; color: #27ae60; margin: 15px 0; }
         
         .info-extra { background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 0.9rem; color: #666; }
-        .info-extra div { margin-bottom: 5px; }
         .etiqueta { font-weight: bold; color: #888; }
 
     </style>
 </head>
 <body>
 
-    <h1>📊 Reporte Diario Unificado</h1>
+    <div class="header">
+        <a href="/estacion/panel" class="btn-back">⬅️ Volver al Panel</a>
+        <h1>📊 Reporte: {{ usuario }}</h1>
+    </div>
 
     <div class="search-box">
         <input type="date" id="fechaSelector">
-        <button onclick="cargarResumen()">Ver Reporte</button>
+        <button class="btn-search" onclick="cargarResumen()">Ver Reporte</button>
     </div>
 
     <div id="dashboard" class="dashboard">
-        <div style="grid-column: 1/-1; text-align: center; color:#888">Selecciona una fecha para ver el resumen.</div>
+        <div style="grid-column: 1/-1; text-align: center; color:#888; margin-top: 20px;">
+            Selecciona una fecha arriba para cargar los datos.
+        </div>
     </div>
 
     <script>
@@ -70,7 +84,7 @@
             
             if(!fecha) return alert("Selecciona una fecha");
 
-            dashboard.innerHTML = '<p style="text-align:center; width:100%">Calculando agrupación...</p>';
+            dashboard.innerHTML = '<p style="text-align:center; width:100%; color:#666;">⏳ Consultando base de datos...</p>';
 
             try {
                 const res = await fetch(`/api/resumen-dia/${fecha}`);
@@ -79,26 +93,39 @@
                 dashboard.innerHTML = ''; // Limpiar
 
                 let totalDia = 0;
+                let cardsGeneradas = 0;
 
                 datos.forEach(turno => {
-                    totalDia += turno.monto;
-                    
-                    const card = document.createElement('div');
-                    card.className = `card ${turno.turno}`;
-                    card.innerHTML = `
-                        <h2>
-                            ${turno.turno}
-                            <span class="icono">${iconos[turno.turno]}</span>
-                        </h2>
-                        <div class="monto-grande">${formatMoney(turno.monto)}</div>
+                    if (turno.monto > 0) { // Solo mostrar si hay dinero
+                        totalDia += turno.monto;
+                        cardsGeneradas++;
                         
-                        <div class="info-extra">
-                            <div><span class="etiqueta">Horario Real:</span> <br>${turno.horario}</div>
-                            <div><span class="etiqueta">Cierres Agrupados:</span> ${turno.cantidad_cierres}</div>
+                        const card = document.createElement('div');
+                        card.className = `card ${turno.turno}`;
+                        card.innerHTML = `
+                            <h2>
+                                ${turno.turno}
+                                <span class="icono">${iconos[turno.turno] || ''}</span>
+                            </h2>
+                            <div class="monto-grande">${formatMoney(turno.monto)}</div>
+                            
+                            <div class="info-extra">
+                                <div><span class="etiqueta">Cierres Z recibidos:</span> ${turno.cantidad_cierres}</div>
+                            </div>
+                        `;
+                        dashboard.appendChild(card);
+                    }
+                });
+
+                if (cardsGeneradas === 0) {
+                    dashboard.innerHTML = `
+                        <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #777;">
+                            <h3>📭 Sin datos para esta fecha</h3>
+                            <p>Asegúrate de haber ejecutado la extracción ("Extraer Reporte") desde el panel.</p>
                         </div>
                     `;
-                    dashboard.appendChild(card);
-                });
+                    return;
+                }
 
                 // Tarjeta de Total del Día
                 const cardTotal = document.createElement('div');
@@ -107,13 +134,13 @@
                 cardTotal.innerHTML = `
                     <h2>TOTAL DÍA 💰</h2>
                     <div class="monto-grande" style="color:#27ae60">${formatMoney(totalDia)}</div>
-                    <div class="info-extra">Suma de los 3 turnos</div>
+                    <div class="info-extra">Suma total de los turnos reportados</div>
                 `;
                 dashboard.appendChild(cardTotal);
 
             } catch (e) {
                 console.error(e);
-                dashboard.innerHTML = '<p style="color:red; text-align:center">Error al conectar con el servidor.</p>';
+                dashboard.innerHTML = '<p style="color:red; text-align:center">Error de conexión con el servidor.</p>';
             }
         }
         

@@ -3,45 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel Estación</title>
+    <title>Panel de Estación</title>
     <style>
-        body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;padding:20px;text-align:center}
-        .container{max-width:600px;margin:0 auto}
-        .btn{display:block;width:100%;padding:20px;margin:15px 0;background:white;border:none;border-radius:12px;text-align:left;text-decoration:none;color:#333;box-shadow:0 4px 6px #00000005;cursor:pointer}
-        .btn:hover{transform:translateY(-2px)}
-        .tag{float:right;padding:5px 10px;border-radius:15px;background:#eee;font-size:0.8rem}
-        .ok{background:#d4edda;color:green} .err{background:#f8d7da;color:red}
-        .act{background:#007bff;color:white;font-weight:bold;text-align:center}
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; display: flex; justify-content: center; }
+        .dashboard-container { background: white; width: 100%; max-width: 600px; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; }
+        
+        h1 { color: #333; margin-bottom: 5px; }
+        .subtitle { color: #666; margin-bottom: 30px; }
+
+        .btn-option {
+            display: block; width: 100%; padding: 15px; margin: 15px 0;
+            border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s; text-decoration: none;
+            box-sizing: border-box; 
+        }
+        .btn-option:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+
+        .btn-config { background-color: #f8f9fa; color: #333; border: 1px solid #ddd; }
+        .btn-report { background-color: #fff; color: #007bff; border: 1px solid #007bff; }
+        .btn-extract { background-color: #6c757d; color: white; }
+        .btn-extract.active { background-color: #28a745; } /* Verde cuando está listo */
+
+        /* Barra de Progreso */
+        #progress-container { display: none; margin: 20px 0; text-align: left; }
+        .progress-bar-bg { background-color: #e9ecef; border-radius: 10px; height: 20px; overflow: hidden; }
+        .progress-bar-fill {
+            height: 100%; background-color: #007bff; width: 0%;
+            transition: width 0.5s ease;
+            background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+            background-size: 1rem 1rem;
+            animation: progress-bar-stripes 1s linear infinite;
+        }
+        @keyframes progress-bar-stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+        
+        .status-text { margin-top: 10px; font-size: 14px; color: #555; font-weight: bold; }
+        .logout { margin-top: 30px; display: inline-block; color: #dc3545; text-decoration: none; font-size: 14px; }
     </style>
-    <script>
-        setInterval(() => {
-            fetch('/api/ping-ui').then(r=>r.json()).then(d=>{
-                if(d.st !== '{{ user.status_conexion }}' || d.cmd !== {{ 'true' if user.comando_pendiente else 'false' }}) 
-                    location.reload();
-            })
-        }, 3000);
-    </script>
 </head>
 <body>
-    <div class="container">
-        <a href="/logout" style="float:right;color:#c0392b;text-decoration:none">Salir</a>
-        <h1>Hola, {{ user.cliente_info.nombre_fantasia if user.cliente_info else user.username }}</h1>
-        
-        <p>Estado PC: 
-            <span class="tag {{ 'ok' if user.status_conexion=='online' else 'err' }}">
-                {{ '🟢 Conectado' if user.status_conexion=='online' else '🔴 Desconectado' }}
-            </span>
-        </p>
 
-        <a href="/estacion/config-vox" class="btn">⚙️ Configurar Credenciales VOX</a>
-        
-        <form method="POST" action="/api/lanzar-orden">
-            <button class="btn act" {% if is_loading %}disabled style="background:gray;cursor:wait"{% endif %}>
-                {{ btn_txt }}
-            </button>
-        </form>
+    <div class="dashboard-container">
+        <h1>Hola, {{ user.username }}</h1>
+        <p class="subtitle">Panel de Control de Estación</p>
 
-        <a href="/estacion/ver-reportes" class="btn">📊 Ver Gráficos y Reportes</a>
+        <a href="/estacion/config-vox" class="btn-option btn-config">
+            ⚙️ Configurar Credenciales VOX
+        </a>
+
+        <button id="btnExtract" onclick="iniciarExtraccion()" class="btn-option btn-extract">
+            ⬇️ EXTRAER REPORTE AHORA
+        </button>
+
+        <div id="progress-container">
+            <div class="progress-bar-bg">
+                <div id="pBar" class="progress-bar-fill"></div>
+            </div>
+            <div id="pText" class="status-text">Solicitando conexión...</div>
+        </div>
+
+        <a href="/estacion/ver-reportes" class="btn-option btn-report">
+            📊 Ver Gráficos y Reportes
+        </a>
+
+        <a href="/logout" class="logout">Cerrar Sesión</a>
     </div>
+
+    <script>
+        let intervalId = null;
+
+        function iniciarExtraccion() {
+            const btn = document.getElementById('btnExtract');
+            const pContainer = document.getElementById('progress-container');
+            const pBar = document.getElementById('pBar');
+            const pText = document.getElementById('pText');
+
+            // 1. UI Inicial
+            btn.disabled = true;
+            btn.innerHTML = "⏳ Conectando...";
+            pContainer.style.display = 'block';
+            pBar.style.width = '10%';
+            pText.innerText = "Enviando orden a la nube...";
+
+            // 2. Enviar orden al servidor
+            fetch('/api/lanzar-orden', { method: 'POST' })
+                .then(() => {
+                    pBar.style.width = '30%';
+                    pText.innerText = "Esperando que la PC responda...";
+                    // 3. Empezar a vigilar el estado
+                    intervalId = setInterval(verificarEstado, 2000);
+                })
+                .catch(err => {
+                    pText.innerText = "Error de conexión.";
+                    pText.style.color = "red";
+                });
+        }
+
+        async function verificarEstado() {
+            try {
+                const res = await fetch('/api/ping-ui');
+                const data = await res.json();
+                const pBar = document.getElementById('pBar');
+                const pText = document.getElementById('pText');
+                const btn = document.getElementById('btnExtract');
+
+                // data.cmd es TRUE si todavía está pendiente
+                // data.cmd es FALSE si la PC ya lo tomó (o no hay comando)
+
+                if (data.cmd === true) {
+                    // Todavía está pendiente en la base de datos
+                    if(parseInt(pBar.style.width) < 60) {
+                        pBar.style.width = (parseInt(pBar.style.width) + 5) + '%';
+                    }
+                    pText.innerText = "Esperando handshake con la PC (puede tardar unos segundos)...";
+                } else {
+                    // ¡La PC ya tomó el comando!
+                    clearInterval(intervalId); // Dejamos de preguntar
+                    pBar.style.width = '100%';
+                    pBar.style.backgroundColor = '#28a745';
+                    pText.innerText = "✅ ¡La PC ha recibido la orden! Procesando datos...";
+                    pText.style.color = "green";
+                    
+                    btn.innerHTML = "✅ EXTRACCIÓN INICIADA";
+                    btn.classList.add('active');
+                    
+                    // Opcional: Redirigir a reportes después de 3 segundos
+                    setTimeout(() => {
+                        window.location.href = "/estacion/ver-reportes";
+                    }, 3000);
+                }
+
+                // Si está offline
+                if (data.st === 'offline') {
+                    pText.innerText = "⚠️ La PC parece desconectada. Revisa el programa en la estación.";
+                    pText.style.color = "#d9534f";
+                    clearInterval(intervalId);
+                }
+
+            } catch (error) {
+                console.error(error);
+            }
+        }
+    </script>
 </body>
 </html>
