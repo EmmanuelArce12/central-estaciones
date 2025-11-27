@@ -214,6 +214,18 @@ def config_vox():
     msg = ""
     cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
 
+    # --- LÓGICA DEL SEMÁFORO ---
+    # Si la PC habló hace menos de 60 segundos, está ONLINE.
+    is_online = False
+    last_seen = "Nunca"
+    
+    if current_user.last_check:
+        diferencia = datetime.now() - current_user.last_check
+        if diferencia.total_seconds() < 60: # 60 segundos de tolerancia
+            is_online = True
+        last_seen = current_user.last_check.strftime("%H:%M:%S")
+    # ---------------------------
+
     if request.method == 'POST':
         try:
             ip = request.form.get('ip')
@@ -228,12 +240,17 @@ def config_vox():
             cred.vox_usuario = u
             cred.vox_clave = p
             
-            # SOLO Activamos el comando, NO tocamos el status (mantiene 'online')
+            # Solo si está online tiene sentido enviar la orden
             current_user.comando_pendiente = 'EXTRACT' 
             
             db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado. La orden de extracción se ha enviado a la PC."
+            
+            if is_online:
+                msg = "✅ Datos enviados. La PC los ha recibido."
+            else:
+                msg = "⚠️ Datos guardados, pero la PC parece desconectada."
+                
         except Exception as e:
             db.session.rollback()
             msg = f"❌ Error: {str(e)}"
@@ -241,9 +258,7 @@ def config_vox():
     if not cred:
         cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
 
-    # Renderiza el archivo con el nombre que tienes en tu carpeta templates
-    return render_template('configurar_vox.html', cred=cred, msg=msg, user=current_user)
-
+    return render_template('configurar_vox.html', cred=cred, msg=msg, user=current_user, is_online=is_online, last_seen=last_seen)
 @app.route('/estacion/ver-reportes')
 @login_required
 def ver_reportes_html():
