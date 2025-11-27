@@ -396,17 +396,92 @@ def reparar_horarios_db():
 @app.route('/estacion/ventas-vendedor', methods=['GET'])
 @login_required
 def ver_ventas_vendedor():
-    # Mostrar datos de hoy por defecto o la fecha seleccionada
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     
+    # 1. Obtener las reglas de juego (Horarios de los turnos) desde Reportes
+    reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
+    
+    # Estructura para saber a qué hora abrió y cerró realmente cada turno ese día
+    limites_turnos = {
+        "Mañana": {"inicio": None, "fin": None},
+        "Tarde": {"inicio": None, "fin": None},
+        "Noche": {"inicio": None, "fin": None}
+    }
+    
+    for r in reportes:
+        if r.turno in limites_turnos:
+            # Buscamos los extremos (si hubo varios cierres, tomamos el rango total)
+            if r.hora_apertura:
+                t_ini = r.hora_apertura.time()
+                if limites_turnos[r.turno]["inicio"] is None or t_ini < limites_turnos[r.turno]["inicio"]:
+                    limites_turnos[r.turno]["inicio"] = t_ini
+            
+            if r.hora_cierre:
+                t_fin = r.hora_cierre.time()
+                if limites_turnos[r.turno]["fin"] is None or t_fin > limites_turnos[r.turno]["fin"]:
+                    limites_turnos[r.turno]["fin"] = t_fin
+
+    # 2. Traer las ventas cargadas del Excel
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
     
-    # Calcular totales para mostrar abajo
-    total_litros = sum(v.litros for v in ventas)
-    total_plata = sum(v.monto for v in ventas)
+    # 3. Clasificación: Crear las cajas para cada turno
+    ventas_por_turno = {
+        "Mañana": [],
+        "Tarde": [],
+        "Noche": [],
+        "Sin Asignar": [] # Por si alguno queda fuera de rango
+    }
     
-    return render_template('ventas_vendedor.html', ventas=ventas, fecha=fecha, t_litros=total_litros, t_plata=total_plata, user=current_user)
-# ----------------------------------
+    total_litros = 0
+    total_plata = 0
+
+    for v in ventas:
+        total_litros += v.litros
+        total_plata += v.monto
+        asignado = False
+        
+        try:
+            # Convertimos el horario del vendedor a objeto time para comparar
+            if not v.primer_horario or v.primer_horario == '-':
+                raise ValueError("Sin hora")
+            hora_venta = datetime.strptime(v.primer_horario, "%H:%M:%S").time()
+        except:
+            ventas_por_turno["Sin Asignar"].append(v)
+            continue
+
+        # El Gran Filtro: Probamos si entra en algún turno detectado
+        for nombre_turno, limites in limites_turnos.items():
+            ini = limites["inicio"]
+            fin = limites["fin"]
+            
+            if ini and fin:
+                # Caso Normal (Ej: Mañana 06:00 a 14:00) -> La hora debe estar en el medio
+                if ini < fin:
+                    if ini <= hora_venta <= fin:
+                        ventas_por_turno[nombre_turno].append(v)
+                        asignado = True
+                        break
+                # Caso Noche/Cruce (Ej: 22:00 a 06:00) -> La hora es mayor al inicio O menor al fin
+                else:
+                    if hora_venta >= ini or hora_venta <= fin:
+                        ventas_por_turno[nombre_turno].append(v)
+                        asignado = True
+                        break
+        
+        # Si no coincidió con los horarios exactos del reporte (o no hay reporte), usamos lógica por defecto
+        if not asignado:
+            h = hora_venta.hour
+            if 6 <= h < 14: ventas_por_turno["Mañana"].append(v)
+            elif 14 <= h < 22: ventas_por_turno["Tarde"].append(v)
+            else: ventas_por_turno["Noche"].append(v)
+
+    return render_template('ventas_vendedor.html', 
+                           ventas_por_turno=ventas_por_turno, 
+                           fecha=fecha, 
+                           t_litros=total_litros, 
+                           t_plata=total_plata,
+                           limites=limites_turnos,
+                           user=current_user)# ----------------------------------
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
@@ -414,28 +489,18 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
     
     archivo = request.files['archivo']
-    # Si no elige fecha, usamos HOY
-    fecha_reporte = request.form.get('fecha') or datetime.now().strftime('%Y-%m-%d')
     
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. VERIFICAR SI YA EXISTE (Para avisar)
-        datos_existentes = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).first()
-        if datos_existentes:
-            flash(f"⚠️ Atención: Ya existían datos del {fecha_reporte}. Se han actualizado con el nuevo archivo.", "warning")
-        else:
-            flash(f"✅ Datos cargados correctamente para el {fecha_reporte}.", "success")
-
-        # 2. Leer Excel sin encabezados
+        # 1. Leer Excel sin encabezados
         df_raw = pd.read_excel(archivo, header=None)
 
-        # 3. Buscar fila de cabecera (Tu lógica robusta)
+        # 2. Buscar fila de cabecera
         fila_tabla = -1
         for i, row in df_raw.iterrows():
             fila_texto = row.astype(str).str.lower().str.strip()
-            # Buscamos palabras clave para asegurar que es la fila correcta
             if (fila_texto.str.contains('vendedor').any() and 
                 fila_texto.str.contains('producto').any() and 
                 fila_texto.str.contains('vol').any() and 
@@ -444,90 +509,85 @@ def subir_ventas_vendedor():
                 break
 
         if fila_tabla == -1:
-            flash("❌ Error: No se detectó la tabla de ventas en el Excel.", "error")
+            flash("❌ No se pudo detectar la tabla real de ventas.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 4. Construir DataFrame
+        # 3. Construir DataFrame
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
         df.columns = df.columns.astype(str).str.strip().str.lower()
 
-        # 5. Mapeo dinámico de columnas
+        # 4. Mapeo de columnas
         try:
+            col_fecha = [c for c in df.columns if 'fecha' in c][0]
             col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
             col_producto = [c for c in df.columns if 'producto' in c][0]
             col_litros = [c for c in df.columns if 'vol' in c][0]
             col_importe = [c for c in df.columns if 'importe' in c][0]
-            col_fecha_hora = [c for c in df.columns if 'fecha' in c][0] # Buscamos columna fecha/hora
-            
-            # Opcionales
             col_precio = next((c for c in df.columns if 'precio' in c), None)
-            col_pago = next((c for c in df.columns if 'tipo' in c), None)
             col_duracion = next((c for c in df.columns if 'duración' in c or 'duracion' in c), None)
+            col_pago = next((c for c in df.columns if 'tipo' in c), None)
         except IndexError:
-            flash("❌ El Excel no tiene las columnas necesarias (Vendedor, Producto, Volumen, Importe).", "error")
+            flash("❌ El Excel no tiene las columnas requeridas (Fecha, Vendedor, Producto...).", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # Seleccionamos y renombramos
-        cols_to_keep = {
-            col_fecha_hora: "Fecha",
-            col_vendedor: "Vendedor",
-            col_producto: "Combustible",
-            col_litros: "Litros",
-            col_importe: "Importe"
-        }
+        # Renombrar
+        cols_to_keep = { col_fecha: "Fecha", col_vendedor: "Vendedor", col_producto: "Combustible", col_litros: "Litros", col_importe: "Importe" }
         if col_precio: cols_to_keep[col_precio] = "Precio"
-        if col_pago: cols_to_keep[col_pago] = "TipoPago"
         if col_duracion: cols_to_keep[col_duracion] = "DuracionSeg"
+        if col_pago: cols_to_keep[col_pago] = "TipoPago"
 
         df = df[list(cols_to_keep.keys())].rename(columns=cols_to_keep)
-
-        # 6. LIMPIEZA DE DATOS (Corrección de suma)
         df = df.dropna(subset=["Vendedor"])
 
+        # --- 5. DETECCIÓN AUTOMÁTICA DE FECHA ---
+        # Convertimos la columna Fecha a objetos datetime
+        # dayfirst=True es importante para fechas tipo 27/11/2025
+        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+        
+        # Eliminamos filas donde la fecha no se pudo leer
+        fechas_validas = df['Fecha_DT'].dropna()
+        
+        if fechas_validas.empty:
+            flash("❌ No se encontraron fechas válidas en el archivo para asignar el día.", "error")
+            return redirect(url_for('ver_ventas_vendedor'))
+
+        # CALCULAMOS LA FECHA DOMINANTE (Moda)
+        # Esto sirve por si hay turnos noche que cruzan las 00:00 hs.
+        # El sistema asignará el reporte al día que tenga más registros.
+        fecha_auto = fechas_validas.dt.date.mode()[0].strftime('%Y-%m-%d')
+        
+        # --- VERIFICAR EXISTENCIA ---
+        existe = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).first()
+        if existe:
+            flash(f"⚠️ Aviso: Ya existían datos del {fecha_auto}. Se han actualizado.", "warning")
+        else:
+            flash(f"✅ Archivo procesado. Se detectó la fecha: {fecha_auto}", "success")
+
+        # 6. Limpieza numérica
         def limpiar_numero(val):
-            # Si ya es un número (float o int), lo devolvemos tal cual
-            if isinstance(val, (int, float)):
-                return float(val)
-            
-            # Si es texto, limpiamos formato argentino
+            if isinstance(val, (int, float)): return float(val)
             val = str(val).strip()
             if val in ["", "-", "nan", "none"]: return 0.0
-            
-            # Formato: 1.234,56 -> 1234.56
             val = val.replace(".", "").replace(",", ".")
             try: return float(val)
             except: return 0.0
 
         for col in ["Litros", "Importe", "Precio", "DuracionSeg"]:
-            if col in df.columns:
-                df[col] = df[col].apply(limpiar_numero)
+            if col in df.columns: df[col] = df[col].apply(limpiar_numero)
 
-        # 7. AGRUPACIÓN (Esto suma los duplicados)
-        # Si tienes el mismo vendedor vendiendo el mismo producto varias veces, se SUMARÁN.
-        # Si quieres ver cada venta por separado, tendríamos que no agrupar, 
-        # pero para "Resumen" la agrupación es lo correcto.
-        
-        # Convertimos fecha para poder ordenar y sacar la primera
-        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-        
-        agregaciones = {
-            "Fecha": "first", # Guardamos la hora de la primera venta del turno/agrupación
-            "Litros": "sum",  # Sumamos litros
-            "Importe": "sum", # Sumamos plata
-        }
-        if "Precio" in df.columns: agregaciones["Precio"] = "mean" # Precio promedio (o first)
+        # 7. Agrupación
+        agregaciones = { "Fecha": "first", "Litros": "sum", "Importe": "sum" }
+        if "Precio" in df.columns: agregaciones["Precio"] = "first" # O mean
         if "TipoPago" in df.columns: agregaciones["TipoPago"] = "first"
         if "DuracionSeg" in df.columns: agregaciones["DuracionSeg"] = "sum"
 
         resumen = df.sort_values("Fecha_DT").groupby(["Vendedor", "Combustible"]).agg(agregaciones).reset_index()
 
-        # 8. Guardar en Base de Datos
-        # Borramos lo viejo de ESTA fecha específica
-        VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
+        # 8. Guardar (Usando fecha_auto)
+        VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).delete()
 
         for _, row in resumen.iterrows():
-            # Formateamos solo la hora
             hora_str = "-"
             try:
                 if pd.notnull(row['Fecha']):
@@ -537,7 +597,7 @@ def subir_ventas_vendedor():
 
             nueva = VentaVendedor(
                 user_id=current_user.id,
-                fecha=fecha_reporte,
+                fecha=fecha_auto, # <--- USAMOS LA FECHA DETECTADA
                 vendedor=row['Vendedor'],
                 combustible=row['Combustible'],
                 litros=round(row['Litros'], 2),
@@ -550,11 +610,12 @@ def subir_ventas_vendedor():
             db.session.add(nueva)
 
         db.session.commit()
-        return redirect(url_for('ver_ventas_vendedor', fecha=fecha_reporte))
+        # REDIRIGIMOS AL USUARIO A LA FECHA DETECTADA
+        return redirect(url_for('ver_ventas_vendedor', fecha=fecha_auto))
 
     except Exception as e:
         print("Error técnico:", e)
-        flash(f"❌ Error procesando el archivo: {str(e)}", "error")
+        flash(f"Error procesando: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
