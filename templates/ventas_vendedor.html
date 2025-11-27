@@ -5,138 +5,94 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ventas por Vendedor</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; max-width: 900px; margin: 0 auto; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; max-width: 1000px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        h1 { color: #333; margin: 0; }
+        .btn-back { text-decoration: none; color: #555; border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; background: white; }
         
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
-        
-        .btn-back { 
-            text-decoration: none; color: #555; font-weight: bold; 
-            border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; 
-            background: white; transition: 0.2s;
-        }
-        .btn-back:hover { background: #e9ecef; }
-        
-        /* TARJETA DE CARGA */
-        .upload-card { 
-            background: white; padding: 25px; border-radius: 12px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
-            display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap;
-            margin-bottom: 30px; 
-        }
+        .upload-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; gap: 15px; margin-bottom: 30px; align-items: flex-end; }
         .form-group { display: flex; flex-direction: column; }
-        label { font-size: 0.9rem; color: #666; margin-bottom: 8px; font-weight: bold; }
-        input { padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+        input, button { padding: 10px; border-radius: 5px; border: 1px solid #ccc; }
+        button { background-color: #28a745; color: white; border: none; cursor: pointer; font-weight: bold; }
         
-        button { 
-            background-color: #28a745; color: white; border: none; 
-            padding: 12px 25px; border-radius: 6px; cursor: pointer; 
-            font-weight: bold; font-size: 14px; transition: 0.2s;
-        }
-        button:hover { background-color: #218838; }
-
-        /* TABLA DE RESULTADOS */
-        .table-wrapper { 
-            background: white; border-radius: 12px; overflow: hidden; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
-        }
-        table { width: 100%; border-collapse: collapse; }
-        
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
         thead { background-color: #007bff; color: white; }
-        th { text-align: left; padding: 15px; font-weight: 600; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.5px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
         
-        td { padding: 15px; border-bottom: 1px solid #eee; color: #333; font-size: 0.95rem; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover { background-color: #f8f9fa; }
+        .monto { font-weight: bold; color: #28a745; }
+        .litros { color: #007bff; font-family: monospace; }
+        .producto { font-weight: 600; color: #555; }
+        .meta { font-size: 0.85rem; color: #888; }
         
-        .vendedor-col { font-weight: bold; color: #2c3e50; }
-        .monto-col { font-weight: bold; color: #28a745; font-family: monospace; font-size: 1rem; }
-        .litros-col { color: #007bff; font-family: monospace; font-size: 1rem; }
-        
-        /* TOTALES */
-        .totales-container { 
-            display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 25px; 
-        }
-        .total-card { 
-            padding: 20px; border-radius: 10px; text-align: center; color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .bg-blue { background: linear-gradient(135deg, #007bff, #0056b3); }
-        .bg-green { background: linear-gradient(135deg, #28a745, #218838); }
-        
-        .total-label { font-size: 0.9rem; opacity: 0.9; margin-bottom: 5px; text-transform: uppercase; }
-        .total-value { font-size: 1.8rem; font-weight: bold; }
-        
-        .empty-state { text-align: center; padding: 50px 20px; color: #888; }
-        .empty-icon { font-size: 3rem; margin-bottom: 15px; display: block; }
-
+        .totales { display: flex; gap: 20px; margin-top: 20px; justify-content: flex-end; }
+        .total-card { background: #343a40; color: white; padding: 15px 30px; border-radius: 8px; text-align: center; }
+        .total-val { font-size: 1.5rem; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div class="header">
         <a href="/estacion/panel" class="btn-back">⬅️ Volver al Panel</a>
-        <h1>👨‍⚕️ Ventas por Vendedor</h1>
+        <h1>👨‍⚕️ Detalle Ventas</h1>
     </div>
 
     <form action="/estacion/subir-ventas-vendedor" method="POST" enctype="multipart/form-data" class="upload-card">
         <div class="form-group">
-            <label>📅 Fecha del Reporte:</label>
+            <label>Fecha:</label>
             <input type="date" name="fecha" value="{{ fecha }}" required>
         </div>
         <div class="form-group" style="flex-grow: 1;">
-            <label>📂 Archivo Excel (.xlsx):</label>
+            <label>Archivo Excel:</label>
             <input type="file" name="archivo" accept=".xlsx, .xls" required>
         </div>
-        <div class="form-group">
-            <label>&nbsp;</label> <button type="submit">⬆️ SUBIR Y PROCESAR</button>
-        </div>
+        <button type="submit">⬆️ PROCESAR</button>
     </form>
 
     {% if ventas %}
-        <div class="table-wrapper">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Vendedor</th>
-                        <th>Litros Vendidos</th>
-                        <th>Total Recaudado</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for v in ventas %}
-                    <tr>
-                        <td class="vendedor-col">{{ v.vendedor }}</td>
-                        <td class="litros-col">{{ "{:,.2f}".format(v.litros) }} L</td>
-                        <td class="monto-col">$ {{ "{:,.2f}".format(v.monto) }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Vendedor</th>
+                    <th>Combustible</th>
+                    <th>Inicio Turno</th>
+                    <th>Precio 1°</th>
+                    <th>Litros</th>
+                    <th>Total ($)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in ventas %}
+                <tr>
+                    <td style="font-weight:bold;">{{ v.vendedor }}</td>
+                    <td class="producto">{{ v.combustible }}</td>
+                    <td class="meta">{{ v.primer_horario }}</td>
+                    <td class="meta">$ {{ "{:,.2f}".format(v.precio) }}</td>
+                    <td class="litros">{{ "{:,.2f}".format(v.litros) }} L</td>
+                    <td class="monto">$ {{ "{:,.2f}".format(v.monto) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
 
-        <div class="totales-container">
-            <div class="total-card bg-blue">
-                <div class="total-label">Total Litros</div>
-                <div class="total-value">{{ "{:,.2f}".format(t_litros) }} L</div>
+        <div class="totales">
+            <div class="total-card">
+                <div>LITROS</div>
+                <div class="total-val">{{ "{:,.2f}".format(t_litros) }} L</div>
             </div>
-            <div class="total-card bg-green">
-                <div class="total-label">Total Dinero</div>
-                <div class="total-value">$ {{ "{:,.2f}".format(t_plata) }}</div>
+            <div class="total-card" style="background-color: #28a745;">
+                <div>DINERO</div>
+                <div class="total-val">$ {{ "{:,.2f}".format(t_plata) }}</div>
             </div>
         </div>
     {% else %}
-        <div class="empty-state">
-            <span class="empty-icon">📂</span>
-            <h3>No hay datos para esta fecha</h3>
-            <p>Selecciona una fecha y sube el archivo "ReporteJefe.xlsx" para ver el análisis.</p>
+        <div style="text-align: center; padding: 40px; color: #888;">
+            <h3>Sin datos para mostrar</h3>
+            <p>Sube el archivo "ReporteJefe" para visualizar el desglose.</p>
         </div>
     {% endif %}
 
     <script>
-        // Recargar página si cambian la fecha en el calendario
-        const dateInput = document.querySelector('input[name="fecha"]');
-        dateInput.addEventListener('change', (e) => {
+        document.querySelector('input[name="fecha"]').addEventListener('change', (e) => {
             window.location.href = `/estacion/ventas-vendedor?fecha=${e.target.value}`;
         });
     </script>

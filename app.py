@@ -80,15 +80,20 @@ class Reporte(db.Model):
     hora_cierre = db.Column(db.DateTime)
     hora_apertura = db.Column(db.DateTime)
 
+# --- MODELO ACTUALIZADO (Con nuevos campos) ---
 class VentaVendedor(db.Model):
     __tablename__ = 'ventas_vendedor'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    fecha = db.Column(db.String(20))  # Fecha del reporte
+    fecha = db.Column(db.String(20))
     vendedor = db.Column(db.String(100))
+    combustible = db.Column(db.String(100)) # Nuevo
     litros = db.Column(db.Float)
+    precio = db.Column(db.Float)            # Nuevo
     monto = db.Column(db.Float)
-# --- INICIALIZACIÓN ---
+    primer_horario = db.Column(db.String(50)) # Nuevo
+    tipo_pago = db.Column(db.String(50))      # Nuevo
+    duracion_seg = db.Column(db.Float)        # Nuevo# --- INICIALIZACIÓN ---
 with app.app_context():
     try:
         db.create_all()
@@ -392,99 +397,123 @@ def reparar_horarios_db():
 @login_required
 def subir_ventas_vendedor():
     if 'archivo' not in request.files:
-        flash("No se subió ningún archivo")
         return redirect(url_for('ver_ventas_vendedor'))
-
+    
     archivo = request.files['archivo']
-    fecha_reporte = request.form.get('fecha') or datetime.now().strftime('%Y-%m-%d')
-
+    fecha_reporte = request.form.get('fecha')
+    
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. LEER EXCEL COMPLETO SIN CABECERAS
+        # 1. Leer Excel sin encabezados
         df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. BUSCAR FILA DONDE ESTÉ LA TABLA REAL
+        # 2. Buscar fila de cabecera (Tu lógica)
         fila_tabla = -1
-
         for i, row in df_raw.iterrows():
             fila_texto = row.astype(str).str.lower().str.strip()
-            if (
-                fila_texto.str.contains('vendedor').any()
-                and fila_texto.str.contains('producto').any()
-                and fila_texto.str.contains('vol').any()
-                and fila_texto.str.contains('importe').any()
-            ):
+            if (fila_texto.str.contains('vendedor').any() and 
+                fila_texto.str.contains('producto').any() and 
+                fila_texto.str.contains('vol').any() and 
+                fila_texto.str.contains('importe').any()):
                 fila_tabla = i
                 break
 
         if fila_tabla == -1:
-            return "❌ No se pudo detectar la tabla real de ventas en el Excel."
+            return "❌ No se pudo detectar la tabla real de ventas."
 
-        # 3. CONSTRUIR DATAFRAME REAL
+        # 3. Construir DataFrame
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
-
-        # 4. NORMALIZAR NOMBRES DE COLUMNAS
         df.columns = df.columns.astype(str).str.strip().str.lower()
 
+        # 4. Mapeo dinámico de columnas
+        col_fecha = [c for c in df.columns if 'fecha' in c][0]
         col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
         col_producto = [c for c in df.columns if 'producto' in c][0]
         col_litros = [c for c in df.columns if 'vol' in c][0]
         col_importe = [c for c in df.columns if 'importe' in c][0]
+        # Usamos next con default por si alguna columna opcional falta
+        col_precio = next((c for c in df.columns if 'precio' in c), None)
+        col_duracion = next((c for c in df.columns if 'duración' in c or 'duracion' in c), None)
+        col_pago = next((c for c in df.columns if 'tipo' in c), None)
 
-        df = df[[col_vendedor, col_producto, col_litros, col_importe]]
-        df.columns = ['Vendedor', 'Producto', 'Litros', 'Importe']
+        # Seleccionamos y renombramos
+        cols_to_keep = {
+            col_fecha: "Fecha",
+            col_vendedor: "Vendedor",
+            col_producto: "Combustible",
+            col_litros: "Litros",
+            col_importe: "Importe"
+        }
+        if col_precio: cols_to_keep[col_precio] = "Precio"
+        if col_duracion: cols_to_keep[col_duracion] = "DuracionSeg"
+        if col_pago: cols_to_keep[col_pago] = "TipoPago"
 
-        # 5. LIMPIEZA
-        df = df.dropna(subset=['Vendedor'])
+        df = df[list(cols_to_keep.keys())].rename(columns=cols_to_keep)
+
+        # 5. Limpieza
+        df = df.dropna(subset=["Vendedor"])
 
         def limpiar_numero(val):
             val = str(val).strip()
-            if val in ['', '-', 'nan', 'None']:
-                return 0.0
-            val = val.replace('.', '').replace(',', '.')
-            try:
-                return float(val)
-            except:
-                return 0.0
+            if val in ["", "-", "nan", "none"]: return 0.0
+            val = val.replace(".", "").replace(",", ".")
+            try: return float(val)
+            except: return 0.0
 
-        df['Litros'] = df['Litros'].apply(limpiar_numero)
-        df['Importe'] = df['Importe'].apply(limpiar_numero)
+        for col in ["Litros", "Importe", "Precio", "DuracionSeg"]:
+            if col in df.columns:
+                df[col] = df[col].apply(limpiar_numero)
 
-        # 6. AGRUPAR POR VENDEDOR + PRODUCTO
-        resumen = df.groupby(['Vendedor', 'Producto'])[['Litros', 'Importe']].sum().reset_index()
+        # 6. Agrupación (Tu lógica exacta)
+        # Convertir fecha a datetime para ordenar bien
+        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], errors='coerce')
+        
+        agregaciones = {
+            "Fecha": "first",
+            "Litros": "sum",
+            "Importe": "sum"
+        }
+        if "Precio" in df.columns: agregaciones["Precio"] = "first"
+        if "TipoPago" in df.columns: agregaciones["TipoPago"] = "first"
+        if "DuracionSeg" in df.columns: agregaciones["DuracionSeg"] = "first"
 
-        # 7. BORRAR DATOS DEL DÍA Y REINSERTAR
-        VentaVendedor.query.filter_by(
-            user_id=current_user.id,
-            fecha=fecha_reporte
-        ).delete()
+        resumen = df.sort_values("Fecha_DT").groupby(["Vendedor", "Combustible"]).agg(agregaciones).reset_index()
+
+        # 7. Guardar en Base de Datos
+        VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
 
         for _, row in resumen.iterrows():
-            nueva_venta = VentaVendedor(
+            # Formateamos la hora para que se vea bien (solo hora)
+            hora_str = str(row['Fecha'])
+            try:
+                if isinstance(row['Fecha'], pd.Timestamp):
+                    hora_str = row['Fecha'].strftime('%H:%M:%S')
+                elif ' ' in hora_str: 
+                    hora_str = hora_str.split(' ')[1] # Si viene "Fecha Hora" tomamos Hora
+            except: pass
+
+            nueva = VentaVendedor(
                 user_id=current_user.id,
                 fecha=fecha_reporte,
-                vendedor=f"{row['Vendedor']} - {row['Producto']}",
+                vendedor=row['Vendedor'],
+                combustible=row['Combustible'],
                 litros=round(row['Litros'], 2),
-                monto=round(row['Importe'], 2)
+                monto=round(row['Importe'], 2),
+                precio=round(row.get('Precio', 0), 2),
+                primer_horario=hora_str,
+                tipo_pago=str(row.get('TipoPago', '-')),
+                duracion_seg=row.get('DuracionSeg', 0)
             )
-            db.session.add(nueva_venta)
+            db.session.add(nueva)
 
         db.session.commit()
-
         return redirect(url_for('ver_ventas_vendedor', fecha=fecha_reporte))
 
     except Exception as e:
         print("Error técnico:", e)
-        return f"""
-        <div style="text-align:center; padding:50px; font-family:sans-serif;">
-            <h1 style="color:red">Error Procesando Excel</h1>
-            <pre>{str(e)}</pre>
-            <br><a href='/estacion/ventas-vendedor'>Volver</a>
-        </div>
-        """
-
+        return f"<h1>Error Procesando Excel</h1><p>{e}</p><a href='/estacion/ventas-vendedor'>Volver</a>"
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
