@@ -415,56 +415,58 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Leer el archivo CRUDO (sin encabezados)
+        # 1. Leer el archivo CRUDO completo
         df_raw = pd.read_excel(archivo, header=None)
         
-        # --- FASE 1: ENCONTRAR LAS COORDENADAS DEL ENCABEZADO ---
-        fila_ancla_importe = -1
-        col_idx_importe = -1
-        col_idx_vendedor = -1
-
-        # Escaneamos las primeras 30 filas buscando nuestros puntos de referencia
-        # Usamos un bucle doble para encontrar la coordenada exacta (fila, columna)
-        for r_idx, row in df_raw.head(30).iterrows():
-            for c_idx, val in enumerate(row):
-                val_str = str(val).strip().lower()
-                
-                # Buscamos la columna Vendedor (puede estar en filas superiores debido a celdas combinadas)
-                if 'Vendedor' in val_str and col_idx_vendedor == -1:
-                    col_idx_vendedor = c_idx
-                
-                # Buscamos el ancla principal: el símbolo ($)
-                if 'Importe ($)' in val_str:
-                    fila_ancla_importe = r_idx
-                    col_idx_importe = c_idx
-            
-            # Si ya encontramos el ancla más baja ($), podemos dejar de buscar filas
-            if fila_ancla_importe != -1 and col_idx_vendedor != -1:
-                break
-
-        # Validaciones de seguridad
-        if fila_ancla_importe == -1:
-            return "❌ Error: No encontré el símbolo '($)' en el encabezado para guiarme."
-        if col_idx_vendedor == -1:
-            return "❌ Error: No encontré la columna 'Vendedor'."
-            
-        # Deducción lógica: La cantidad está justo a la izquierda del importe
-        col_idx_cantidad = col_idx_importe - 1
-
-        # --- FASE 2: RECORTE QUIRÚRGICO ---
-        # Los datos reales empiezan en la fila siguiente al ancla ($)
-        fila_inicio_datos = fila_ancla_importe + 1
+        # 2. BUSCAR EL ANCLA "DETALLE:"
+        fila_detalle = -1
         
-        # Recortamos el DataFrame: desde la fila de datos hasta el final
+        # Escaneamos las primeras 50 filas
+        for r_idx, row in df_raw.head(50).iterrows():
+            # Convertimos la fila a texto y buscamos "detalle:" (ignorando mayúsculas)
+            if row.astype(str).str.contains('DETALLE:', case=False, na=False).any():
+                fila_detalle = r_idx
+                break
+        
+        if fila_detalle == -1:
+            return "❌ Error: No encontré la celda 'DETALLE:' en el archivo para ubicarme."
+
+        # 3. IDENTIFICAR COLUMNAS BASADO EN LA ESTRUCTURA DEL EXCEL
+        # Según tu archivo:
+        # Fila DETALLE + 1 = Encabezados Principales ("Vendedor", "Combustibles")
+        fila_encabezados = df_raw.iloc[fila_detalle + 1]
+        
+        col_vendedor = -1
+        col_combustibles = -1
+        
+        for c_idx, val in enumerate(fila_encabezados):
+            val_str = str(val).strip().lower()
+            if 'vendedor' in val_str:
+                col_vendedor = c_idx
+            if 'combustibles' in val_str:
+                col_combustibles = c_idx
+                # En Excel, cuando hay celdas combinadas, el título queda en la primera columna.
+                # Por lo tanto, col_combustibles es "Cantidad" y col_combustibles + 1 es "Importe"
+
+        if col_vendedor == -1 or col_combustibles == -1:
+            return f"❌ Error: Encontré 'DETALLE:' pero no las columnas 'Vendedor' o 'Combustibles' debajo."
+
+        # Definimos las columnas de datos
+        col_cantidad = col_combustibles      # La columna donde empieza "Combustibles"
+        col_importe = col_combustibles + 1   # La columna siguiente
+
+        # 4. EXTRAER DATOS
+        # Los datos reales empiezan 3 filas después de DETALLE:
+        # (Fila Detalle) -> (Fila Vendedor) -> (Fila Subtítulos) -> DATOS
+        fila_inicio_datos = fila_detalle + 3
+        
         df_datos = df_raw.iloc[fila_inicio_datos:].copy()
         
-        # Seleccionamos SOLO las 3 columnas que nos interesan usando sus índices numéricos
-        df_final = df_datos.iloc[:, [col_idx_vendedor, col_idx_cantidad, col_idx_importe]]
-        
-        # Renombramos las columnas para trabajar cómodamente
+        # Seleccionamos las columnas detectadas
+        df_final = df_datos.iloc[:, [col_vendedor, col_cantidad, col_importe]]
         df_final.columns = ['Vendedor', 'Cantidad', 'Importe']
 
-        # --- FASE 3: LIMPIEZA Y PROCESAMIENTO (Igual que antes) ---
+        # 5. LIMPIEZA Y GUARDADO
         df_final = df_final.dropna(subset=['Vendedor'])
         
         def limpiar_numero(val):
@@ -480,7 +482,7 @@ def subir_ventas_vendedor():
         df_final['Cantidad'] = df_final['Cantidad'].apply(limpiar_numero)
         df_final['Importe'] = df_final['Importe'].apply(limpiar_numero)
 
-        # Agrupar y Sumar por Vendedor
+        # Agrupar por vendedor (por si aparecen repetidos)
         resumen = df_final.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
 
         # Guardar en Base de Datos
@@ -488,7 +490,7 @@ def subir_ventas_vendedor():
         
         for index, row in resumen.iterrows():
             nombre = str(row['Vendedor']).strip()
-            # Filtramos filas basura que suelen quedar al final (Totales del excel, etc)
+            # Ignoramos filas de totales del propio excel
             if nombre and nombre.lower() not in ['total', 'totales', 'nan', 'none'] and not nombre.startswith('='):
                 nueva_venta = VentaVendedor(
                     user_id=current_user.id,
@@ -507,9 +509,9 @@ def subir_ventas_vendedor():
         return f"""
         <div style="text-align:center; padding:50px; font-family:sans-serif;">
             <h1 style="color:red">Error Procesando Excel</h1>
-            <p>No se pudo interpretar el archivo. Detalles:</p>
-            <code style="background:#eee; padding:10px; display:block;white-space:pre-wrap;">{str(e)}</code>
-            <br><a href='/estacion/ventas-vendedor'>Volver a intentar</a>
+            <p>Detalle del error:</p>
+            <code style="background:#eee; padding:10px; display:block;">{str(e)}</code>
+            <br><a href='/estacion/ventas-vendedor'>Volver</a>
         </div>
         """
 if __name__ == '__main__': 
