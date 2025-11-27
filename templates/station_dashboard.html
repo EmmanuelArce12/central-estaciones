@@ -19,12 +19,18 @@
         }
         .btn-option:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
 
+        /* Colores de Botones */
         .btn-config { background-color: #f8f9fa; color: #333; border: 1px solid #ddd; }
-        .btn-report { background-color: #fff; color: #007bff; border: 1px solid #007bff; }
         
         .btn-extract { background-color: #6c757d; color: white; }
         .btn-extract:disabled { background-color: #ccc; cursor: not-allowed; transform: none; }
         .btn-extract.active { background-color: #28a745; } 
+
+        .btn-report { background-color: #fff; color: #007bff; border: 1px solid #007bff; }
+        
+        /* NUEVO BOTÓN: VENTAS VENDEDOR */
+        .btn-vendedor { background-color: #17a2b8; color: white; }
+        .btn-vendedor:hover { background-color: #138496; }
 
         /* Barra de Progreso */
         #progress-container { display: none; margin: 20px 0; text-align: left; }
@@ -61,7 +67,13 @@
             <div id="pText" class="status-text">Iniciando...</div>
         </div>
 
-        <a href="/estacion/ver-reportes" class="btn-option btn-report">📊 Ver Reportes VOX diarios</a>
+        <a href="/estacion/ventas-vendedor" class="btn-option btn-vendedor">
+            👨‍⚕️ Cargar Ventas por Vendedor (Excel)
+        </a>
+
+        <a href="/estacion/ver-reportes" class="btn-option btn-report">
+            📊 Ver Gráficos y Reportes
+        </a>
 
         <a href="/logout" class="logout">Cerrar Sesión</a>
     </div>
@@ -69,7 +81,6 @@
     <script>
         let intervalId = null;
 
-        // Al cargar la página, verificamos si había una extracción en curso
         window.onload = function() {
             if (localStorage.getItem('extracting') === 'true') {
                 restaurarEstadoExtraccion();
@@ -80,20 +91,17 @@
             const btn = document.getElementById('btnExtract');
             const pContainer = document.getElementById('progress-container');
             
-            // Bloqueamos visualmente
             btn.disabled = true;
             btn.innerHTML = "⏳ Extracción en curso...";
             pContainer.style.display = 'block';
             
-            // Retomamos el monitoreo
             intervalId = setInterval(verificarEstado, 2000);
         }
 
         function iniciarExtraccion() {
             const btn = document.getElementById('btnExtract');
-            if (btn.disabled) return; // Evitar doble click
+            if (btn.disabled) return;
 
-            // Guardamos estado en memoria del navegador
             localStorage.setItem('extracting', 'true');
             
             btn.disabled = true;
@@ -103,10 +111,8 @@
             document.getElementById('pBar').style.width = '5%';
             document.getElementById('pText').innerText = "Contactando a la PC...";
 
-            // Enviar orden al servidor
             fetch('/api/lanzar-orden', { method: 'POST' })
                 .then(() => {
-                    // Comenzar monitoreo
                     if (!intervalId) intervalId = setInterval(verificarEstado, 2000);
                 })
                 .catch(err => {
@@ -125,25 +131,16 @@
                 const pText = document.getElementById('pText');
                 const btn = document.getElementById('btnExtract');
 
-                // data.cmd es TRUE si la orden sigue pendiente (la PC no la tomó aun)
-                // data.cmd es FALSE si la PC ya la tomó y está trabajando
-
                 if (data.cmd === true) {
-                    // La PC aun no recoge la orden
                     pText.innerText = "Esperando que la PC inicie la descarga...";
                     if(parseInt(pBar.style.width) < 30) pBar.style.width = '30%';
                 
                 } else {
-                    // La PC ya tomó la orden. Simulamos progreso de subida.
-                    // Nota: Como no sabemos el total exacto, hacemos una carga visual
-                    // que se completa cuando detectamos actividad o pasa tiempo.
-                    
                     let currentWidth = parseInt(pBar.style.width);
                     if (currentWidth < 90) {
                         pBar.style.width = (currentWidth + 10) + '%';
                         pText.innerText = "Subiendo reportes a la nube... (" + currentWidth + "%)";
                     } else {
-                        // TERMINADO
                         finalizarExtraccion();
                     }
                 }
@@ -165,7 +162,7 @@
             const btn = document.getElementById('btnExtract');
 
             clearInterval(intervalId);
-            localStorage.removeItem('extracting'); // Limpiamos memoria
+            localStorage.removeItem('extracting'); 
 
             pBar.style.width = '100%';
             pBar.style.backgroundColor = '#28a745';

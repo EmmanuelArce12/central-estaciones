@@ -1,5 +1,6 @@
 import os
 import secrets
+import pandas as pd
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -79,6 +80,14 @@ class Reporte(db.Model):
     hora_cierre = db.Column(db.DateTime)
     hora_apertura = db.Column(db.DateTime)
 
+class VentaVendedor(db.Model):
+    __tablename__ = 'ventas_vendedor'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    fecha = db.Column(db.String(20))  # Fecha del reporte
+    vendedor = db.Column(db.String(100))
+    litros = db.Column(db.Float)
+    monto = db.Column(db.Float)
 # --- INICIALIZACIÓN ---
 with app.app_context():
     try:
@@ -377,6 +386,76 @@ def reparar_horarios_db():
             except: errores += 1
     db.session.commit()
     print(f"✅ FINALIZADO: {count} ok, {errores} errores.")
+# --- MÓDULO VENTAS POR VENDEDOR ---
+
+@app.route('/estacion/ventas-vendedor', methods=['GET'])
+@login_required
+def ver_ventas_vendedor():
+    # Mostrar datos de hoy por defecto o la fecha seleccionada
+    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    
+    ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
+    
+    # Calcular totales para mostrar abajo
+    total_litros = sum(v.litros for v in ventas)
+    total_plata = sum(v.monto for v in ventas)
+    
+    return render_template('ventas_vendedor.html', ventas=ventas, fecha=fecha, t_litros=total_litros, t_plata=total_plata, user=current_user)
+
+@app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
+@login_required
+def subir_ventas_vendedor():
+    if 'archivo' not in request.files:
+        flash("No se subió ningún archivo")
+        return redirect(url_for('ver_ventas_vendedor'))
+    
+    archivo = request.files['archivo']
+    fecha_reporte = request.form.get('fecha') # El usuario elige la fecha del reporte
+    
+    if archivo.filename == '':
+        return redirect(url_for('ver_ventas_vendedor'))
+
+    try:
+        # 1. Leer el Excel (Asumiendo que el encabezado está en la fila 7, índice 6)
+        # Ajustamos header=6 porque en tu CSV el encabezado empieza en la línea 7
+        df = pd.read_excel(archivo, header=6) 
+        
+        # 2. Limpieza de datos (Clave para formatos argentinos)
+        # Eliminamos filas vacías si las hay
+        df = df.dropna(subset=['Vendedor'])
+        
+        # Función para limpiar números (1.234,56 -> 1234.56)
+        def limpiar_numero(val):
+            if isinstance(val, str):
+                val = val.replace('.', '').replace(',', '.')
+            return float(val)
+
+        df['Cantidad'] = df['Cantidad'].apply(limpiar_numero)
+        df['Importe'] = df['Importe'].apply(limpiar_numero)
+
+        # 3. Agrupar por Vendedor
+        resumen = df.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
+
+        # 4. Guardar en Base de Datos
+        # Primero borramos si ya existían datos de esa fecha para evitar duplicados
+        VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
+        
+        for index, row in resumen.iterrows():
+            nueva_venta = VentaVendedor(
+                user_id=current_user.id,
+                fecha=fecha_reporte,
+                vendedor=row['Vendedor'],
+                litros=round(row['Cantidad'], 2),
+                monto=round(row['Importe'], 2)
+            )
+            db.session.add(nueva_venta)
+        
+        db.session.commit()
+        return redirect(url_for('ver_ventas_vendedor', fecha=fecha_reporte))
+
+    except Exception as e:
+        print(f"Error procesando excel: {e}")
+        return f"Error procesando el archivo: {str(e)} <br> <a href='/estacion/ventas-vendedor'>Volver</a>"
 
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
