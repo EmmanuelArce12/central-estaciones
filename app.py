@@ -369,53 +369,49 @@ def admin_status_all():
 
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
-# --- HERRAMIENTA DE REPARACIÓN (SOLO ADMIN) ---
-@app.route('/admin/reparar-horarios-db')
-@login_required
-def reparar_horarios():
-    # 1. Seguridad: Solo el superadmin puede ejecutar esto
-    if not current_user.is_superadmin:
-        return "❌ Acceso Denegado. Solo Superadmin."
+# ==========================================
+# 🛠️ HERRAMIENTAS DE MANTENIMIENTO (CLI)
+# ==========================================
+# Estos comandos no se ejecutan solos. 
+# Se activan desde la consola (Shell) de Render con: flask [nombre-comando]
 
+@app.cli.command("reparar-horarios")
+def reparar_horarios_db():
+    """Recalcula horarios de apertura/cierre basados en el texto crudo del VOX."""
+    print("🔧 Iniciando reparación de base de datos...")
+    
+    # 1. Traer datos
+    reportes = Reporte.query.all()
     count = 0
     errores = 0
-    logs = []
-
-    # 2. Traemos todos los reportes de la base de datos real
-    reportes = Reporte.query.all()
 
     for r in reportes:
-        # Solo procesamos si tiene el texto crudo pero le falta la apertura
-        if r.fecha_completa: 
+        # Solo reparamos si hay fecha cruda (el texto largo)
+        if r.fecha_completa:
             try:
-                # Lógica de extracción (La misma que usamos en la API nueva)
-                # Formato: "2025-11 (2025/11/02 21:43:34 - 2025/11/03 00:01:19)"
+                # LÓGICA DE EXTRACCIÓN (La misma que usas en la API)
+                # Formato esperado: "2025-11 (2025/11/02 21:43:34 - 2025/11/03 00:01:19)"
                 contenido = r.fecha_completa.split('(')[1].replace(')', '') 
                 partes = contenido.split(' - ')
                 
                 str_inicio = partes[0].strip()
                 str_fin = partes[1].strip()
                 
-                # Convertimos texto a objetos de fecha reales
+                # Convertir a objetos fecha reales
                 dt_inicio = datetime.strptime(str_inicio, "%Y/%m/%d %H:%M:%S")
                 dt_fin = datetime.strptime(str_fin, "%Y/%m/%d %H:%M:%S")
                 
-                # ACTUALIZAMOS LA BASE DE DATOS
+                # SOBREESCRIBIR / CORREGIR DATOS EN LA DB
                 r.hora_apertura = dt_inicio
                 r.hora_cierre = dt_fin
                 
                 count += 1
             except Exception as e:
                 errores += 1
-                logs.append(f"Error en ID {r.id}: {str(e)}")
+                # Opcional: print(f"Error en ID {r.id}: {e}")
 
-    # 3. Guardamos los cambios masivos
+    # 2. Guardar cambios masivos
     db.session.commit()
-
-    return f"""
-    <h1>🛠️ Reparación Completa</h1>
-    <p>✅ Se actualizaron correctamente <b>{count}</b> reportes con sus horarios reales.</p>
-    <p>❌ Hubo <b>{errores}</b> errores de formato.</p>
-    <br>
-    <a href="/estacion/ver-reportes">Volver a Ver Reportes</a>
-    """
+    
+    print(f"✅ FINALIZADO: {count} reportes actualizados/corregidos.")
+    print(f"⚠️ ERRORES: {errores} reportes no se pudieron leer.")
