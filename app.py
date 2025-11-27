@@ -1,5 +1,6 @@
 import os
 import secrets
+import difflib # <--- IMPORTANTE: Agregar esto para buscar nombres parecidos
 import pandas as pd
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
@@ -94,6 +95,18 @@ class VentaVendedor(db.Model):
     primer_horario = db.Column(db.String(50)) # Nuevo
     tipo_pago = db.Column(db.String(50))      # Nuevo
     duracion_seg = db.Column(db.Float)        # Nuevo# --- INICIALIZACIÓN ---
+class Tirada(db.Model):
+    __tablename__ = 'tiradas'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    fecha_operativa = db.Column(db.String(20)) 
+    vendedor = db.Column(db.String(100))      # Nombre ya corregido/normalizado
+    vendedor_raw = db.Column(db.String(100))  # Nombre original del CSV (por si acaso)
+    monto = db.Column(db.Float)
+    hora = db.Column(db.String(20))
+    turno = db.Column(db.String(50))
+    sector = db.Column(db.String(50))
+    detalle_extra = db.Column(db.String(200)) # Cualquier otra nota del CSV
 with app.app_context():
     try:
         db.create_all()
@@ -617,5 +630,107 @@ def subir_ventas_vendedor():
         print("Error técnico:", e)
         flash(f"Error procesando: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
+# --- RUTAS PARA TIRADAS (SOBRES) ---
+
+@app.route('/estacion/tiradas', methods=['GET'])
+@login_required
+def ver_tiradas():
+    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    
+    # Obtenemos las tiradas
+    tiradas = Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
+    
+    # Totales generales para las tarjetas de arriba
+    total_plata = sum([t.monto for t in tiradas])
+    total_sobres = len(tiradas)
+
+    return render_template('tiradas.html', 
+                           tiradas=tiradas, 
+                           fecha=fecha, 
+                           t_plata=total_plata, 
+                           t_sobres=total_sobres)
+
+@app.route('/estacion/subir-tiradas', methods=['POST'])
+@login_required
+def subir_tiradas():
+    if 'archivo' not in request.files: return redirect(url_for('ver_tiradas'))
+    archivo = request.files['archivo']
+    if not archivo.filename: return redirect(url_for('ver_tiradas'))
+
+    try:
+        # 1. Leer CSV (Probamos coma y punto y coma)
+        try:
+            df = pd.read_csv(archivo)
+            if len(df.columns) < 2: # Si falló el separador
+                archivo.seek(0)
+                df = pd.read_csv(archivo, sep=';')
+        except:
+            flash("❌ Error leyendo el CSV. Verifique el formato.", "error")
+            return redirect(url_for('ver_tiradas'))
+
+        # Normalizar nombres de columnas
+        df.columns = df.columns.astype(str).str.lower().str.strip()
+        
+        # Intentar detectar columnas clave
+        col_monto = next((c for c in df.columns if 'monto' in c or 'importe' in c or 'valor' in c), None)
+        col_vend = next((c for c in df.columns if 'vendedor' in c or 'playero' in c or 'nombre' in c), None)
+        col_hora = next((c for c in df.columns if 'hora' in c), None)
+        col_turno = next((c for c in df.columns if 'turno' in c), None)
+        col_sector = next((c for c in df.columns if 'sector' in c), None) # Opcional
+
+        if not col_monto or not col_vend:
+            flash("❌ El CSV debe tener al menos columnas de 'Vendedor' y 'Monto'.", "error")
+            return redirect(url_for('ver_tiradas'))
+
+        # 2. Obtener lista de vendedores "oficiales" (los que vendieron combustible ese día)
+        # Esto sirve para la "Similitud"
+        fecha_hoy = request.form.get('fecha_manual', datetime.now().strftime('%Y-%m-%d'))
+        
+        ventas_existentes = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_hoy).all()
+        nombres_oficiales = list(set([v.vendedor for v in ventas_existentes])) # Lista única: ['Ruben Arce', 'Maria L']
+
+        # Limpiar tiradas viejas de esa fecha para no duplicar al resubir
+        Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha_hoy).delete()
+
+        count = 0
+        for _, row in df.iterrows():
+            nombre_csv = str(row[col_vend]).strip()
+            
+            # --- LÓGICA DE SIMILITUD (FUZZY MATCHING) ---
+            nombre_final = nombre_csv 
+            if nombres_oficiales:
+                # Busca el nombre más parecido en la lista oficial
+                # cutoff=0.4 significa que con un 40% de similitud ya lo toma (es flexible)
+                matches = difflib.get_close_matches(nombre_csv, nombres_oficiales, n=1, cutoff=0.4)
+                if matches:
+                    nombre_final = matches[0] # Usamos el nombre oficial (Ej: Cambia "Arce R" por "Ruben Arce")
+
+            # Procesar monto
+            try:
+                monto_raw = str(row[col_monto]).replace('$','').replace('.','').replace(',','.')
+                monto_val = float(monto_raw)
+            except: monto_val = 0.0
+
+            nueva = Tirada(
+                user_id=current_user.id,
+                fecha_operativa=fecha_hoy,
+                vendedor=nombre_final,      # Nombre Corregido
+                vendedor_raw=nombre_csv,    # Nombre Original
+                monto=monto_val,
+                hora=str(row[col_hora]) if col_hora else "-",
+                turno=str(row[col_turno]) if col_turno else "-",
+                sector=str(row[col_sector]) if col_sector else "-"
+            )
+            db.session.add(nueva)
+            count += 1
+
+        db.session.commit()
+        flash(f"✅ Se procesaron {count} tiradas para el {fecha_hoy}. Nombres unificados.", "success")
+        return redirect(url_for('ver_tiradas', fecha=fecha_hoy))
+
+    except Exception as e:
+        print(e)
+        flash(f"Error técnico: {e}", "error")
+        return redirect(url_for('ver_tiradas'))
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
