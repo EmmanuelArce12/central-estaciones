@@ -410,52 +410,80 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
     
     archivo = request.files['archivo']
-    fecha_reporte = request.form.get('fecha') # El usuario elige la fecha del reporte
+    fecha_reporte = request.form.get('fecha')
     
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Leer el Excel (Asumiendo que el encabezado está en la fila 7, índice 6)
-        # Ajustamos header=6 porque en tu CSV el encabezado empieza en la línea 7
-        df = pd.read_excel(archivo, header=6) 
+        # 1. Lectura Inteligente: Buscar dónde empieza la tabla
+        # Leemos las primeras 20 filas sin encabezado para "escanear"
+        df_temp = pd.read_excel(archivo, header=None, nrows=20)
         
-        # 2. Limpieza de datos (Clave para formatos argentinos)
-        # Eliminamos filas vacías si las hay
+        fila_header = -1
+        # Buscamos en qué fila está la palabra "Vendedor"
+        for i, row in df_temp.iterrows():
+            fila_texto = row.astype(str).str.lower().values
+            # Buscamos si alguna celda de la fila contiene 'vendedor'
+            if any('vendedor' in celda for celda in fila_texto):
+                fila_header = i
+                break
+        
+        if fila_header == -1:
+            return "❌ Error: No encontré la columna 'Vendedor' en las primeras 20 filas del Excel. Revisa el formato."
+
+        # 2. Cargar el Excel real usando la fila encontrada como encabezado
+        # Resetear puntero del archivo para leerlo de nuevo desde el disco
+        archivo.seek(0)
+        df = pd.read_excel(archivo, header=fila_header)
+
+        # 3. Limpieza de nombres de columnas (quitar espacios extra: " Vendedor " -> "Vendedor")
+        df.columns = df.columns.str.strip()
+
+        # Verificar que existan las columnas críticas
+        cols_necesarias = ['Vendedor', 'Cantidad', 'Importe']
+        if not all(col in df.columns for col in cols_necesarias):
+            return f"❌ Error de Columnas: El sistema busca {cols_necesarias} pero el Excel tiene: {list(df.columns)}"
+
+        # 4. Limpieza de filas vacías
         df = df.dropna(subset=['Vendedor'])
         
-        # Función para limpiar números (1.234,56 -> 1234.56)
+        # 5. Limpieza de números (Formato Argentino 1.000,00 -> Python 1000.00)
         def limpiar_numero(val):
             if isinstance(val, str):
+                # Quitamos puntos de mil y cambiamos coma por punto
                 val = val.replace('.', '').replace(',', '.')
-            return float(val)
+            try:
+                return float(val)
+            except:
+                return 0.0
 
         df['Cantidad'] = df['Cantidad'].apply(limpiar_numero)
         df['Importe'] = df['Importe'].apply(limpiar_numero)
 
-        # 3. Agrupar por Vendedor
+        # 6. Agrupar por Vendedor
         resumen = df.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
 
-        # 4. Guardar en Base de Datos
-        # Primero borramos si ya existían datos de esa fecha para evitar duplicados
+        # 7. Guardar en Base de Datos (Reemplazar datos previos de esa fecha)
         VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
         
         for index, row in resumen.iterrows():
-            nueva_venta = VentaVendedor(
-                user_id=current_user.id,
-                fecha=fecha_reporte,
-                vendedor=row['Vendedor'],
-                litros=round(row['Cantidad'], 2),
-                monto=round(row['Importe'], 2)
-            )
-            db.session.add(nueva_venta)
+            # Ignorar vendedores vacíos o "Totales" si el excel los trae
+            if row['Vendedor'] and str(row['Vendedor']).lower() != 'total':
+                nueva_venta = VentaVendedor(
+                    user_id=current_user.id,
+                    fecha=fecha_reporte,
+                    vendedor=row['Vendedor'],
+                    litros=round(row['Cantidad'], 2),
+                    monto=round(row['Importe'], 2)
+                )
+                db.session.add(nueva_venta)
         
         db.session.commit()
         return redirect(url_for('ver_ventas_vendedor', fecha=fecha_reporte))
 
     except Exception as e:
         print(f"Error procesando excel: {e}")
-        return f"Error procesando el archivo: {str(e)} <br> <a href='/estacion/ventas-vendedor'>Volver</a>"
-
+        return f"<h3>💥 Ocurrió un error procesando el archivo:</h3><p>{str(e)}</p><br><a href='/estacion/ventas-vendedor'>Volver</a>"
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
