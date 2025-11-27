@@ -555,5 +555,6 @@ def subir_ventas_vendedor():
     except Exception as e:
         print("Error técnico:", e)
         flash(f"❌ Error procesando el archivo: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))if __name__ == '__main__': 
+        return redirect(url_for('ver_ventas_vendedor'))
+if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
