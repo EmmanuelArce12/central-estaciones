@@ -83,7 +83,7 @@ with app.app_context():
     try:
         db.create_all()
     except Exception as e:
-        print(f"Error DB: {e}")
+        print(f"⚠️ Advertencia DB: {e}")
 
 @login_manager.user_loader
 def load_user(uid): 
@@ -130,7 +130,6 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
-# --- CORRECCIÓN AQUÍ: CREACIÓN AUTOMÁTICA DE TABLAS AL CREAR USUARIO ---
 @app.route('/admin/dashboard', methods=['GET', 'POST'])
 @login_required
 def panel_superadmin():
@@ -147,25 +146,21 @@ def panel_superadmin():
             if User.query.filter_by(username=u).first():
                 msg = "❌ El usuario ya existe."
             else:
-                # 1. Crear Usuario Base
                 nu = User(username=u, role=r)
                 nu.set_password(p)
                 db.session.add(nu)
-                db.session.commit() # Commit necesario para obtener el ID del usuario
+                db.session.commit()
                 
-                # 2. Si es estación, crear sus tablas dependientes AUTOMÁTICAMENTE
                 if r == 'estacion':
-                    # A. Crear info Cliente (Nombre Fantasía)
+                    # Crear Cliente
                     nc = Cliente(nombre_fantasia=n, user_id=nu.id)
                     db.session.add(nc)
-                    
-                    # B. Crear Credenciales VOX (Vacías, pero existiendo) <--- ESTO FALTABA
+                    # Crear Credencial VOX vacía (EVITA ERROR 500)
                     cv = CredencialVox(user_id=nu.id, vox_ip="", vox_usuario="", vox_clave="")
                     db.session.add(cv)
                     
                     db.session.commit()
-                    
-                msg = "✅ Usuario y tablas de configuración creadas correctamente."
+                msg = "✅ Usuario creado correctamente."
                 
         elif 'link_pc' in request.form:
             code_input = request.form.get('pairing_code', '').strip().upper()
@@ -212,6 +207,7 @@ def panel_estacion():
         is_loading = True
     return render_template('station_dashboard.html', user=current_user, btn_txt=btn_txt, is_loading=is_loading)
 
+# --- FUNCIÓN CORREGIDA FINAL ---
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
@@ -224,7 +220,6 @@ def config_vox():
             u = request.form.get('u')
             p = request.form.get('p')
             
-            # Autocorrección por si se creó manual o falló el alta
             if not cred: 
                 cred = CredencialVox(user_id=current_user.id)
                 db.session.add(cred) 
@@ -233,12 +228,12 @@ def config_vox():
             cred.vox_usuario = u
             cred.vox_clave = p
             
-            current_user.status_conexion = 'pendiente'
+            # SOLO Activamos el comando, NO tocamos el status (mantiene 'online')
             current_user.comando_pendiente = 'EXTRACT' 
             
             db.session.add(current_user)
             db.session.commit()
-            msg = "✅ Guardado y enviado a PC."
+            msg = "✅ Guardado. La orden de extracción se ha enviado a la PC."
         except Exception as e:
             db.session.rollback()
             msg = f"❌ Error: {str(e)}"
@@ -246,6 +241,7 @@ def config_vox():
     if not cred:
         cred = CredencialVox(vox_ip="", vox_usuario="", vox_clave="")
 
+    # Renderiza el archivo con el nombre que tienes en tu carpeta templates
     return render_template('configurar_vox.html', cred=cred, msg=msg, user=current_user)
 
 @app.route('/estacion/ver-reportes')
@@ -253,7 +249,7 @@ def config_vox():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-# --- APIS ---
+# --- APIS (ORIGINALES) ---
 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_poll():

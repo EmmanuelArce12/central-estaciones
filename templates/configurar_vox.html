@@ -2,29 +2,88 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Configurar VOX</title>
-    </head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuración VOX</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f6f8;
+        }
+        h1 { color: #333; }
+        .form-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-top: 15px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover { background-color: #218838; }
+        .msg {
+            color: green;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .error { color: red; }
+        .back-link {
+            display: block;
+            margin-top: 20px;
+            text-align: center;
+            text-decoration: none;
+            color: #007bff;
+        }
+    </style>
+</head>
 <body>
-    <h1>Configuración de Conexión VOX</h1>
-    
-    {% if msg %}
-        <p style="color: blue; font-weight: bold;">{{ msg }}</p>
-    {% endif %}
 
-    <form method="POST" action="/estacion/config-vox">
-        <label>IP del Servidor VOX:</label><br>
-        <input type="text" name="ip" value="{{ cred.vox_ip }}" required placeholder="Ej: 192.168.1.50"><br><br>
+    <div class="form-container">
+        <h1>Configuración de Conexión VOX</h1>
 
-        <label>Usuario VOX:</label><br>
-        <input type="text" name="u" value="{{ cred.vox_usuario }}" required placeholder="Usuario"><br><br>
+        {% if msg %}
+            <p class="msg {% if 'Error' in msg %}error{% endif %}">{{ msg }}</p>
+        {% endif %}
 
-        <label>Contraseña VOX:</label><br>
-        <input type="text" name="p" value="{{ cred.vox_clave }}" required placeholder="Contraseña"><br><br>
+        <form method="POST" action="/estacion/config-vox">
+            <label for="ip">IP del Servidor VOX:</label>
+            <input type="text" id="ip" name="ip" value="{{ cred.vox_ip }}" required placeholder="Ej: 192.168.1.100">
 
-        <button type="submit">GUARDAR Y VINCULAR</button>
-    </form>
-    
-    <br>
-    <a href="/estacion/panel">Volver al Panel</a>
+            <label for="u">Usuario VOX:</label>
+            <input type="text" id="u" name="u" value="{{ cred.vox_usuario }}" required placeholder="Nombre de usuario">
+
+            <label for="p">Contraseña VOX:</label>
+            <input type="text" id="p" name="p" value="{{ cred.vox_clave }}" required placeholder="Contraseña">
+
+            <button type="submit">GUARDAR Y VINCULAR</button>
+        </form>
+
+        <a href="/estacion/panel" class="back-link">Volver al Panel</a>
+    </div>
+
 </body>
 </html>
