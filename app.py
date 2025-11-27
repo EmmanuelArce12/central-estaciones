@@ -90,34 +90,25 @@ with app.app_context():
 def load_user(uid): 
     return User.query.get(int(uid))
 
-# --- NUEVA LÓGICA DE PARSEO DE FECHAS REALES ---
+# --- PARSEO DE FECHAS ---
 def procesar_datos_turno(s):
-    # Formato esperado: "2025-11 (2025/11/02 21:43:34 - 2025/11/03 00:01:19)"
     try:
-        # 1. Limpiamos y obtenemos el contenido entre paréntesis
-        contenido = s.split('(')[1].replace(')', '') # "2025/11/02 21:43:34 - 2025/11/03 00:01:19"
+        contenido = s.split('(')[1].replace(')', '') 
         partes = contenido.split(' - ')
-        
         str_apertura = partes[0].strip()
         str_cierre = partes[1].strip()
         
-        # 2. Convertimos a objetos DateTime REALES
         dt_apertura = datetime.strptime(str_apertura, "%Y/%m/%d %H:%M:%S")
         dt_cierre = datetime.strptime(str_cierre, "%Y/%m/%d %H:%M:%S")
         
-        # 3. Calcular Fecha Operativa y Turno (Basado en Cierre)
         h = dt_cierre.hour
         fecha_obj = dt_cierre.date()
         turno = "Noche"
         
-        if 6 <= h < 14: 
-            turno = "Mañana"
-        elif 14 <= h < 22: 
-            turno = "Tarde"
+        if 6 <= h < 14: turno = "Mañana"
+        elif 14 <= h < 22: turno = "Tarde"
         else:
-            # Si es madrugada (ej: 03:00 AM), pertenece al turno noche de AYER
-            if h < 6: 
-                fecha_obj = fecha_obj - timedelta(days=1)
+            if h < 6: fecha_obj = fecha_obj - timedelta(days=1)
         
         return fecha_obj.strftime("%Y-%m-%d"), turno, dt_cierre, dt_apertura
     except Exception as e: 
@@ -275,9 +266,7 @@ def rep():
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
-        # Parseo con la nueva lógica (Extraer de texto real)
         f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
-        
         if not f_op: return jsonify({"status":"error_fecha"}), 400
 
         r = Reporte(
@@ -289,7 +278,7 @@ def rep():
             fecha_operativa=f_op, 
             turno=turno, 
             hora_cierre=dt_cierre,
-            hora_apertura=dt_apertura # Guardamos la hora REAL que vino del string
+            hora_apertura=dt_apertura
         )
         db.session.add(r)
         db.session.commit()
@@ -311,7 +300,7 @@ def lanzar():
     current_user.comando_pendiente = 'EXTRACT'; db.session.commit()
     return jsonify({"status": "ok"})
 
-# --- LÓGICA DE UNIFICACIÓN DE HORARIOS ---
+# --- API RESUMEN (MODIFICADA: Orden Fijo y Datos Completos) ---
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
@@ -319,6 +308,7 @@ def api_res(fecha):
     
     agrupado = {}
     
+    # 1. Agrupar datos
     for r in reps:
         if r.turno not in agrupado:
             agrupado[r.turno] = {
@@ -331,26 +321,28 @@ def api_res(fecha):
         agrupado[r.turno]["monto"] += r.monto
         agrupado[r.turno]["count"] += 1
         
-        # LÓGICA CLAVE: Buscar extremos
-        # 1. Buscamos la apertura más TEMPRANA de todas las sesiones de este turno
+        # Actualizar extremos
         if r.hora_apertura < agrupado[r.turno]["apertura"]:
             agrupado[r.turno]["apertura"] = r.hora_apertura
-            
-        # 2. Buscamos el cierre más TARDÍO de todas las sesiones
         if r.hora_cierre > agrupado[r.turno]["cierre"]:
             agrupado[r.turno]["cierre"] = r.hora_cierre
 
+    # 2. Generar lista ordenada (Mañana -> Tarde -> Noche)
     salida = []
-    for turno, datos in agrupado.items():
-        ini = datos["apertura"].strftime("%H:%M:%S") if datos["apertura"] else "??"
-        fin = datos["cierre"].strftime("%H:%M:%S") if datos["cierre"] else "??"
-        
-        salida.append({
-            "turno": turno,
-            "monto": datos["monto"],
-            "cantidad_cierres": datos["count"],
-            "horario_real": f"{ini} a {fin}" 
-        })
+    orden_turnos = ["Mañana", "Tarde", "Noche"]
+
+    for turno in orden_turnos:
+        if turno in agrupado:
+            datos = agrupado[turno]
+            ini = datos["apertura"].strftime("%H:%M:%S") if datos["apertura"] else "??"
+            fin = datos["cierre"].strftime("%H:%M:%S") if datos["cierre"] else "??"
+            
+            salida.append({
+                "turno": turno,
+                "monto": datos["monto"],
+                "cantidad_cierres": datos["count"],
+                "horario_real": f"{ini} a {fin}" 
+            })
         
     return jsonify(salida)
 
@@ -367,51 +359,24 @@ def admin_status_all():
         data.append({"id": u.id, "status": st, "code": u.device_pairing_code, "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca"})
     return jsonify(data)
 
-if __name__ == '__main__': 
-    app.run(host='0.0.0.0', port=10000)
-# ==========================================
-# 🛠️ HERRAMIENTAS DE MANTENIMIENTO (CLI)
-# ==========================================
-# Estos comandos no se ejecutan solos. 
-# Se activan desde la consola (Shell) de Render con: flask [nombre-comando]
-
+# --- HERRAMIENTA CLI ---
 @app.cli.command("reparar-horarios")
 def reparar_horarios_db():
     """Recalcula horarios de apertura/cierre basados en el texto crudo del VOX."""
     print("🔧 Iniciando reparación de base de datos...")
-    
-    # 1. Traer datos
-    reportes = Reporte.query.all()
-    count = 0
-    errores = 0
-
+    reportes = Reporte.query.all(); count = 0; errores = 0
     for r in reportes:
-        # Solo reparamos si hay fecha cruda (el texto largo)
         if r.fecha_completa:
             try:
-                # LÓGICA DE EXTRACCIÓN (La misma que usas en la API)
-                # Formato esperado: "2025-11 (2025/11/02 21:43:34 - 2025/11/03 00:01:19)"
                 contenido = r.fecha_completa.split('(')[1].replace(')', '') 
                 partes = contenido.split(' - ')
-                
-                str_inicio = partes[0].strip()
-                str_fin = partes[1].strip()
-                
-                # Convertir a objetos fecha reales
-                dt_inicio = datetime.strptime(str_inicio, "%Y/%m/%d %H:%M:%S")
-                dt_fin = datetime.strptime(str_fin, "%Y/%m/%d %H:%M:%S")
-                
-                # SOBREESCRIBIR / CORREGIR DATOS EN LA DB
-                r.hora_apertura = dt_inicio
-                r.hora_cierre = dt_fin
-                
+                dt_inicio = datetime.strptime(partes[0].strip(), "%Y/%m/%d %H:%M:%S")
+                dt_fin = datetime.strptime(partes[1].strip(), "%Y/%m/%d %H:%M:%S")
+                r.hora_apertura = dt_inicio; r.hora_cierre = dt_fin
                 count += 1
-            except Exception as e:
-                errores += 1
-                # Opcional: print(f"Error en ID {r.id}: {e}")
-
-    # 2. Guardar cambios masivos
+            except: errores += 1
     db.session.commit()
-    
-    print(f"✅ FINALIZADO: {count} reportes actualizados/corregidos.")
-    print(f"⚠️ ERRORES: {errores} reportes no se pudieron leer.")
+    print(f"✅ FINALIZADO: {count} ok, {errores} errores.")
+
+if __name__ == '__main__': 
+    app.run(host='0.0.0.0', port=10000)
