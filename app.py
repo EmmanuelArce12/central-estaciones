@@ -80,20 +80,21 @@ class Reporte(db.Model):
     hora_cierre = db.Column(db.DateTime)
     hora_apertura = db.Column(db.DateTime)
 
-# --- MODELO ACTUALIZADO (Con nuevos campos) ---
 class VentaVendedor(db.Model):
     __tablename__ = 'ventas_vendedor'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     fecha = db.Column(db.String(20))
     vendedor = db.Column(db.String(100))
-    combustible = db.Column(db.String(100)) # Nuevo
+    combustible = db.Column(db.String(100))
     litros = db.Column(db.Float)
-    precio = db.Column(db.Float)            # Nuevo
+    precio = db.Column(db.Float)
     monto = db.Column(db.Float)
-    primer_horario = db.Column(db.String(50)) # Nuevo
-    tipo_pago = db.Column(db.String(50))      # Nuevo
-    duracion_seg = db.Column(db.Float)        # Nuevo# --- INICIALIZACIÓN ---
+    primer_horario = db.Column(db.String(50))
+    tipo_pago = db.Column(db.String(50))
+    duracion_seg = db.Column(db.Float)
+
+# --- INICIALIZACIÓN ---
 with app.app_context():
     try:
         db.create_all()
@@ -119,10 +120,10 @@ def procesar_datos_turno(s):
         fecha_obj = dt_cierre.date()
         turno = "Noche"
         
-        if 6 <= h < 14: turno = "Mañana"
-        elif 14 <= h < 22: turno = "Tarde"
+        if 10 <= h < 14: turno = "Mañana" # Ajuste tolerancia
+        elif 14 <= h < 23: turno = "Tarde" # Ajuste tolerancia
         else:
-            if h < 6: fecha_obj = fecha_obj - timedelta(days=1)
+            if h < 10: fecha_obj = fecha_obj - timedelta(days=1)
         
         return fecha_obj.strftime("%Y-%m-%d"), turno, dt_cierre, dt_apertura
     except Exception as e: 
@@ -280,8 +281,8 @@ def rep():
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
-        f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
-        if not f_op: return jsonify({"status":"error_fecha"}), 400
+        f,t,d,a = procesar_datos_turno(n.get('fecha'))
+        if not f: return jsonify({"status":"error_fecha"}), 400
 
         r = Reporte(
             user_id=u.id, 
@@ -289,10 +290,10 @@ def rep():
             estacion=n.get('estacion'), 
             fecha_completa=n.get('fecha'), 
             monto=n.get('monto'), 
-            fecha_operativa=f_op, 
-            turno=turno, 
-            hora_cierre=dt_cierre,
-            hora_apertura=dt_apertura
+            fecha_operativa=f, 
+            turno=t, 
+            hora_cierre=d,
+            hora_apertura=a
         )
         db.session.add(r)
         db.session.commit()
@@ -314,34 +315,25 @@ def lanzar():
     current_user.comando_pendiente = 'EXTRACT'; db.session.commit()
     return jsonify({"status": "ok"})
 
-# --- API RESUMEN (MODIFICADA: Orden Fijo y Datos Completos) ---
+# --- API RESUMEN ---
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
-    
     agrupado = {}
     
-    # 1. Agrupar datos
     for r in reps:
         if r.turno not in agrupado:
-            agrupado[r.turno] = {
-                "monto": 0.0, 
-                "apertura": r.hora_apertura, 
-                "cierre": r.hora_cierre, 
-                "count": 0
-            }
+            agrupado[r.turno] = {"monto": 0.0, "apertura": r.hora_apertura, "cierre": r.hora_cierre, "count": 0}
         
         agrupado[r.turno]["monto"] += r.monto
         agrupado[r.turno]["count"] += 1
         
-        # Actualizar extremos
-        if r.hora_apertura < agrupado[r.turno]["apertura"]:
+        if r.hora_apertura and r.hora_apertura < agrupado[r.turno]["apertura"]:
             agrupado[r.turno]["apertura"] = r.hora_apertura
-        if r.hora_cierre > agrupado[r.turno]["cierre"]:
+        if r.hora_cierre and r.hora_cierre > agrupado[r.turno]["cierre"]:
             agrupado[r.turno]["cierre"] = r.hora_cierre
 
-    # 2. Generar lista ordenada (Mañana -> Tarde -> Noche)
     salida = []
     orden_turnos = ["Mañana", "Tarde", "Noche"]
 
@@ -350,13 +342,7 @@ def api_res(fecha):
             datos = agrupado[turno]
             ini = datos["apertura"].strftime("%H:%M:%S") if datos["apertura"] else "??"
             fin = datos["cierre"].strftime("%H:%M:%S") if datos["cierre"] else "??"
-            
-            salida.append({
-                "turno": turno,
-                "monto": datos["monto"],
-                "cantidad_cierres": datos["count"],
-                "horario_real": f"{ini} a {fin}" 
-            })
+            salida.append({"turno": turno, "monto": datos["monto"], "cantidad_cierres": datos["count"], "horario_real": f"{ini} a {fin}"})
         
     return jsonify(salida)
 
@@ -373,32 +359,14 @@ def admin_status_all():
         data.append({"id": u.id, "status": st, "code": u.device_pairing_code, "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca"})
     return jsonify(data)
 
-# --- HERRAMIENTA CLI ---
-@app.cli.command("reparar-horarios")
-def reparar_horarios_db():
-    """Recalcula horarios de apertura/cierre basados en el texto crudo del VOX."""
-    print("🔧 Iniciando reparación de base de datos...")
-    reportes = Reporte.query.all(); count = 0; errores = 0
-    for r in reportes:
-        if r.fecha_completa:
-            try:
-                contenido = r.fecha_completa.split('(')[1].replace(')', '') 
-                partes = contenido.split(' - ')
-                dt_inicio = datetime.strptime(partes[0].strip(), "%Y/%m/%d %H:%M:%S")
-                dt_fin = datetime.strptime(partes[1].strip(), "%Y/%m/%d %H:%M:%S")
-                r.hora_apertura = dt_inicio; r.hora_cierre = dt_fin
-                count += 1
-            except: errores += 1
-    db.session.commit()
-    print(f"✅ FINALIZADO: {count} ok, {errores} errores.")
-# --- MÓDULO VENTAS POR VENDEDOR ---
-# --- ESTA ES LA PARTE QUE FALTA ---
+# --- MÓDULO VENTAS POR VENDEDOR (NUEVA LÓGICA CON ACORDEÓN) ---
+
 @app.route('/estacion/ventas-vendedor', methods=['GET'])
 @login_required
 def ver_ventas_vendedor():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     
-    # 1. Obtener horarios de referencia
+    # 1. Obtener horarios de referencia (Reporte)
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     
     limites_turnos = {
@@ -413,24 +381,16 @@ def ver_ventas_vendedor():
                 t_ini = r.hora_apertura.time()
                 if limites_turnos[r.turno]["inicio"] is None or t_ini < limites_turnos[r.turno]["inicio"]:
                     limites_turnos[r.turno]["inicio"] = t_ini
-            
             if r.hora_cierre:
                 t_fin = r.hora_cierre.time()
                 if limites_turnos[r.turno]["fin"] is None or t_fin > limites_turnos[r.turno]["fin"]:
                     limites_turnos[r.turno]["fin"] = t_fin
 
-    # 2. Traer ventas
+    # 2. Traer ventas (Excel)
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
     
-    # 3. Clasificación y Agrupación Jerárquica
-    # Estructura: { "Mañana": { "Juan": {'total': 100, 'items': [...]}, ... }, ... }
-    datos_agrupados = {
-        "Mañana": {},
-        "Tarde": {},
-        "Noche": {},
-        "Sin Asignar": {}
-    }
-    
+    # 3. Clasificación y Agrupación
+    datos_agrupados = { "Mañana": {}, "Tarde": {}, "Noche": {}, "Sin Asignar": {} }
     total_litros_dia = 0
     total_plata_dia = 0
 
@@ -438,7 +398,6 @@ def ver_ventas_vendedor():
         total_litros_dia += v.litros
         total_plata_dia += v.monto
         
-        # --- Determinar Turno ---
         turno_asignado = "Sin Asignar"
         try:
             if not v.primer_horario or v.primer_horario == '-': raise ValueError
@@ -448,16 +407,16 @@ def ver_ventas_vendedor():
             for nombre_turno, limites in limites_turnos.items():
                 ini, fin = limites["inicio"], limites["fin"]
                 if ini and fin:
-                    if ini < fin: # Rango normal
+                    if ini < fin:
                         if ini <= hora_venta <= fin:
                             turno_asignado = nombre_turno
                             asignado = True; break
-                    else: # Cruce medianoche
+                    else:
                         if hora_venta >= ini or hora_venta <= fin:
                             turno_asignado = nombre_turno
                             asignado = True; break
             
-            if not asignado: # Fallback por hora fija
+            if not asignado:
                 h = hora_venta.hour
                 if 6 <= h < 14: turno_asignado = "Mañana"
                 elif 14 <= h < 22: turno_asignado = "Tarde"
@@ -465,15 +424,9 @@ def ver_ventas_vendedor():
         except:
             pass
 
-        # --- Agrupar por Vendedor dentro del Turno ---
         if v.vendedor not in datos_agrupados[turno_asignado]:
-            datos_agrupados[turno_asignado][v.vendedor] = {
-                'items': [],
-                'subtotal_plata': 0.0,
-                'subtotal_litros': 0.0
-            }
+            datos_agrupados[turno_asignado][v.vendedor] = {'items': [], 'subtotal_plata': 0.0, 'subtotal_litros': 0.0}
         
-        # Agregar datos
         datos = datos_agrupados[turno_asignado][v.vendedor]
         datos['items'].append(v)
         datos['subtotal_plata'] += v.monto
@@ -486,6 +439,7 @@ def ver_ventas_vendedor():
                            t_plata=total_plata_dia,
                            limites=limites_turnos,
                            user=current_user)
+
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
@@ -493,35 +447,29 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
     
     archivo = request.files['archivo']
-    
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Leer Excel sin encabezados
         df_raw = pd.read_excel(archivo, header=None)
-
-        # 2. Buscar fila de cabecera
+        
+        # Buscar cabecera
         fila_tabla = -1
         for i, row in df_raw.iterrows():
-            fila_texto = row.astype(str).str.lower().str.strip()
-            if (fila_texto.str.contains('vendedor').any() and 
-                fila_texto.str.contains('producto').any() and 
-                fila_texto.str.contains('vol').any() and 
-                fila_texto.str.contains('importe').any()):
+            txt = row.astype(str).str.lower().str.strip()
+            if (txt.str.contains('vendedor').any() and txt.str.contains('producto').any() and txt.str.contains('importe').any()):
                 fila_tabla = i
                 break
 
         if fila_tabla == -1:
-            flash("❌ No se pudo detectar la tabla real de ventas.", "error")
+            flash("❌ No se detectó la tabla de ventas.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 3. Construir DataFrame
+        # Construir DF
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
         df.columns = df.columns.astype(str).str.strip().str.lower()
 
-        # 4. Mapeo de columnas
         try:
             col_fecha = [c for c in df.columns if 'fecha' in c][0]
             col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
@@ -531,45 +479,33 @@ def subir_ventas_vendedor():
             col_precio = next((c for c in df.columns if 'precio' in c), None)
             col_duracion = next((c for c in df.columns if 'duración' in c or 'duracion' in c), None)
             col_pago = next((c for c in df.columns if 'tipo' in c), None)
-        except IndexError:
-            flash("❌ El Excel no tiene las columnas requeridas (Fecha, Vendedor, Producto...).", "error")
+        except:
+            flash("❌ Columnas faltantes en Excel.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # Renombrar
-        cols_to_keep = { col_fecha: "Fecha", col_vendedor: "Vendedor", col_producto: "Combustible", col_litros: "Litros", col_importe: "Importe" }
-        if col_precio: cols_to_keep[col_precio] = "Precio"
-        if col_duracion: cols_to_keep[col_duracion] = "DuracionSeg"
-        if col_pago: cols_to_keep[col_pago] = "TipoPago"
+        cols = { col_fecha: "Fecha", col_vendedor: "Vendedor", col_producto: "Combustible", col_litros: "Litros", col_importe: "Importe" }
+        if col_precio: cols[col_precio] = "Precio"
+        if col_duracion: cols[col_duracion] = "DuracionSeg"
+        if col_pago: cols[col_pago] = "TipoPago"
 
-        df = df[list(cols_to_keep.keys())].rename(columns=cols_to_keep)
-        df = df.dropna(subset=["Vendedor"])
+        df = df[list(cols.keys())].rename(columns=cols).dropna(subset=["Vendedor"])
 
-        # --- 5. DETECCIÓN AUTOMÁTICA DE FECHA ---
-        # Convertimos la columna Fecha a objetos datetime
-        # dayfirst=True es importante para fechas tipo 27/11/2025
+        # Detectar Fecha
         df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-        
-        # Eliminamos filas donde la fecha no se pudo leer
-        fechas_validas = df['Fecha_DT'].dropna()
-        
-        if fechas_validas.empty:
-            flash("❌ No se encontraron fechas válidas en el archivo para asignar el día.", "error")
+        validas = df['Fecha_DT'].dropna()
+        if validas.empty:
+            flash("❌ No se encontraron fechas válidas.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
-
-        # CALCULAMOS LA FECHA DOMINANTE (Moda)
-        # Esto sirve por si hay turnos noche que cruzan las 00:00 hs.
-        # El sistema asignará el reporte al día que tenga más registros.
-        fecha_auto = fechas_validas.dt.date.mode()[0].strftime('%Y-%m-%d')
         
-        # --- VERIFICAR EXISTENCIA ---
-        existe = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).first()
-        if existe:
-            flash(f"⚠️ Aviso: Ya existían datos del {fecha_auto}. Se han actualizado.", "warning")
+        fecha_auto = validas.dt.date.mode()[0].strftime('%Y-%m-%d')
+        
+        if VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).first():
+            flash(f"⚠️ Aviso: Datos del {fecha_auto} actualizados.", "warning")
         else:
-            flash(f"✅ Archivo procesado. Se detectó la fecha: {fecha_auto}", "success")
+            flash(f"✅ Archivo procesado. Fecha: {fecha_auto}", "success")
 
-        # 6. Limpieza numérica
-        def limpiar_numero(val):
+        # Limpieza y Agrupación
+        def clean_num(val):
             if isinstance(val, (int, float)): return float(val)
             val = str(val).strip()
             if val in ["", "-", "nan", "none"]: return 0.0
@@ -577,18 +513,16 @@ def subir_ventas_vendedor():
             try: return float(val)
             except: return 0.0
 
-        for col in ["Litros", "Importe", "Precio", "DuracionSeg"]:
-            if col in df.columns: df[col] = df[col].apply(limpiar_numero)
+        for c in ["Litros", "Importe", "Precio", "DuracionSeg"]:
+            if c in df.columns: df[c] = df[c].apply(clean_num)
 
-        # 7. Agrupación
-        agregaciones = { "Fecha": "first", "Litros": "sum", "Importe": "sum" }
-        if "Precio" in df.columns: agregaciones["Precio"] = "first" # O mean
-        if "TipoPago" in df.columns: agregaciones["TipoPago"] = "first"
-        if "DuracionSeg" in df.columns: agregaciones["DuracionSeg"] = "sum"
+        agg = { "Fecha": "first", "Litros": "sum", "Importe": "sum" }
+        if "Precio" in df.columns: agg["Precio"] = "first"
+        if "TipoPago" in df.columns: agg["TipoPago"] = "first"
+        if "DuracionSeg" in df.columns: agg["DuracionSeg"] = "sum"
 
-        resumen = df.sort_values("Fecha_DT").groupby(["Vendedor", "Combustible"]).agg(agregaciones).reset_index()
+        resumen = df.sort_values("Fecha_DT").groupby(["Vendedor", "Combustible"]).agg(agg).reset_index()
 
-        # 8. Guardar (Usando fecha_auto)
         VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).delete()
 
         for _, row in resumen.iterrows():
@@ -600,26 +534,18 @@ def subir_ventas_vendedor():
             except: pass
 
             nueva = VentaVendedor(
-                user_id=current_user.id,
-                fecha=fecha_auto, # <--- USAMOS LA FECHA DETECTADA
-                vendedor=row['Vendedor'],
-                combustible=row['Combustible'],
-                litros=round(row['Litros'], 2),
-                monto=round(row['Importe'], 2),
-                precio=round(row.get('Precio', 0), 2),
-                primer_horario=hora_str,
-                tipo_pago=str(row.get('TipoPago', '-')),
-                duracion_seg=row.get('DuracionSeg', 0)
+                user_id=current_user.id, fecha=fecha_auto, vendedor=row['Vendedor'], combustible=row['Combustible'],
+                litros=round(row['Litros'], 2), monto=round(row['Importe'], 2), precio=round(row.get('Precio', 0), 2),
+                primer_horario=hora_str, tipo_pago=str(row.get('TipoPago', '-')), duracion_seg=row.get('DuracionSeg', 0)
             )
             db.session.add(nueva)
 
         db.session.commit()
-        # REDIRIGIMOS AL USUARIO A LA FECHA DETECTADA
         return redirect(url_for('ver_ventas_vendedor', fecha=fecha_auto))
 
     except Exception as e:
-        print("Error técnico:", e)
-        flash(f"Error procesando: {str(e)}", "error")
+        flash(f"❌ Error procesando: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
+
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
