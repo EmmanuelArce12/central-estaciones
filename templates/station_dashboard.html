@@ -21,8 +21,10 @@
 
         .btn-config { background-color: #f8f9fa; color: #333; border: 1px solid #ddd; }
         .btn-report { background-color: #fff; color: #007bff; border: 1px solid #007bff; }
+        
         .btn-extract { background-color: #6c757d; color: white; }
-        .btn-extract.active { background-color: #28a745; } /* Verde cuando está listo */
+        .btn-extract:disabled { background-color: #ccc; cursor: not-allowed; transform: none; }
+        .btn-extract.active { background-color: #28a745; } 
 
         /* Barra de Progreso */
         #progress-container { display: none; margin: 20px 0; text-align: left; }
@@ -46,9 +48,7 @@
         <h1>Hola, {{ user.username }}</h1>
         <p class="subtitle">Panel de Control de Estación</p>
 
-        <a href="/estacion/config-vox" class="btn-option btn-config">
-            ⚙️ Configurar Credenciales VOX
-        </a>
+        <a href="/estacion/config-vox" class="btn-option btn-config">⚙️ Configurar Credenciales VOX</a>
 
         <button id="btnExtract" onclick="iniciarExtraccion()" class="btn-option btn-extract">
             ⬇️ EXTRAER REPORTE AHORA
@@ -58,12 +58,10 @@
             <div class="progress-bar-bg">
                 <div id="pBar" class="progress-bar-fill"></div>
             </div>
-            <div id="pText" class="status-text">Solicitando conexión...</div>
+            <div id="pText" class="status-text">Iniciando...</div>
         </div>
 
-        <a href="/estacion/ver-reportes" class="btn-option btn-report">
-            📊 Ver Gráficos y Reportes
-        </a>
+        <a href="/estacion/ver-reportes" class="btn-option btn-report">📊 Ver Gráficos y Reportes</a>
 
         <a href="/logout" class="logout">Cerrar Sesión</a>
     </div>
@@ -71,30 +69,50 @@
     <script>
         let intervalId = null;
 
-        function iniciarExtraccion() {
+        // Al cargar la página, verificamos si había una extracción en curso
+        window.onload = function() {
+            if (localStorage.getItem('extracting') === 'true') {
+                restaurarEstadoExtraccion();
+            }
+        };
+
+        function restaurarEstadoExtraccion() {
             const btn = document.getElementById('btnExtract');
             const pContainer = document.getElementById('progress-container');
-            const pBar = document.getElementById('pBar');
-            const pText = document.getElementById('pText');
-
-            // 1. UI Inicial
+            
+            // Bloqueamos visualmente
             btn.disabled = true;
-            btn.innerHTML = "⏳ Conectando...";
+            btn.innerHTML = "⏳ Extracción en curso...";
             pContainer.style.display = 'block';
-            pBar.style.width = '10%';
-            pText.innerText = "Enviando orden a la nube...";
+            
+            // Retomamos el monitoreo
+            intervalId = setInterval(verificarEstado, 2000);
+        }
 
-            // 2. Enviar orden al servidor
+        function iniciarExtraccion() {
+            const btn = document.getElementById('btnExtract');
+            if (btn.disabled) return; // Evitar doble click
+
+            // Guardamos estado en memoria del navegador
+            localStorage.setItem('extracting', 'true');
+            
+            btn.disabled = true;
+            btn.innerHTML = "⏳ Enviando orden...";
+            
+            document.getElementById('progress-container').style.display = 'block';
+            document.getElementById('pBar').style.width = '5%';
+            document.getElementById('pText').innerText = "Contactando a la PC...";
+
+            // Enviar orden al servidor
             fetch('/api/lanzar-orden', { method: 'POST' })
                 .then(() => {
-                    pBar.style.width = '30%';
-                    pText.innerText = "Esperando que la PC responda...";
-                    // 3. Empezar a vigilar el estado
-                    intervalId = setInterval(verificarEstado, 2000);
+                    // Comenzar monitoreo
+                    if (!intervalId) intervalId = setInterval(verificarEstado, 2000);
                 })
                 .catch(err => {
-                    pText.innerText = "Error de conexión.";
-                    pText.style.color = "red";
+                    console.error(err);
+                    alert("Error de conexión");
+                    resetearEstado();
                 });
         }
 
@@ -102,46 +120,70 @@
             try {
                 const res = await fetch('/api/ping-ui');
                 const data = await res.json();
+                
                 const pBar = document.getElementById('pBar');
                 const pText = document.getElementById('pText');
                 const btn = document.getElementById('btnExtract');
 
-                // data.cmd es TRUE si todavía está pendiente
-                // data.cmd es FALSE si la PC ya lo tomó (o no hay comando)
+                // data.cmd es TRUE si la orden sigue pendiente (la PC no la tomó aun)
+                // data.cmd es FALSE si la PC ya la tomó y está trabajando
 
                 if (data.cmd === true) {
-                    // Todavía está pendiente en la base de datos
-                    if(parseInt(pBar.style.width) < 60) {
-                        pBar.style.width = (parseInt(pBar.style.width) + 5) + '%';
-                    }
-                    pText.innerText = "Esperando handshake con la PC (puede tardar unos segundos)...";
+                    // La PC aun no recoge la orden
+                    pText.innerText = "Esperando que la PC inicie la descarga...";
+                    if(parseInt(pBar.style.width) < 30) pBar.style.width = '30%';
+                
                 } else {
-                    // ¡La PC ya tomó el comando!
-                    clearInterval(intervalId); // Dejamos de preguntar
-                    pBar.style.width = '100%';
-                    pBar.style.backgroundColor = '#28a745';
-                    pText.innerText = "✅ ¡La PC ha recibido la orden! Procesando datos...";
-                    pText.style.color = "green";
+                    // La PC ya tomó la orden. Simulamos progreso de subida.
+                    // Nota: Como no sabemos el total exacto, hacemos una carga visual
+                    // que se completa cuando detectamos actividad o pasa tiempo.
                     
-                    btn.innerHTML = "✅ EXTRACCIÓN INICIADA";
-                    btn.classList.add('active');
-                    
-                    // Opcional: Redirigir a reportes después de 3 segundos
-                    setTimeout(() => {
-                        window.location.href = "/estacion/ver-reportes";
-                    }, 3000);
+                    let currentWidth = parseInt(pBar.style.width);
+                    if (currentWidth < 90) {
+                        pBar.style.width = (currentWidth + 10) + '%';
+                        pText.innerText = "Subiendo reportes a la nube... (" + currentWidth + "%)";
+                    } else {
+                        // TERMINADO
+                        finalizarExtraccion();
+                    }
                 }
 
-                // Si está offline
                 if (data.st === 'offline') {
-                    pText.innerText = "⚠️ La PC parece desconectada. Revisa el programa en la estación.";
-                    pText.style.color = "#d9534f";
-                    clearInterval(intervalId);
+                    pText.innerText = "⚠️ Error: La PC se desconectó.";
+                    pText.style.color = "red";
+                    resetearEstado();
                 }
 
             } catch (error) {
                 console.error(error);
             }
+        }
+
+        function finalizarExtraccion() {
+            const pBar = document.getElementById('pBar');
+            const pText = document.getElementById('pText');
+            const btn = document.getElementById('btnExtract');
+
+            clearInterval(intervalId);
+            localStorage.removeItem('extracting'); // Limpiamos memoria
+
+            pBar.style.width = '100%';
+            pBar.style.backgroundColor = '#28a745';
+            pText.innerText = "✅ ¡Carga Completa!";
+            pText.style.color = "green";
+            
+            btn.innerHTML = "✅ PROCESO FINALIZADO";
+            
+            setTimeout(() => {
+                window.location.href = "/estacion/ver-reportes";
+            }, 2000);
+        }
+
+        function resetearEstado() {
+            localStorage.removeItem('extracting');
+            clearInterval(intervalId);
+            document.getElementById('btnExtract').disabled = false;
+            document.getElementById('btnExtract').innerHTML = "⬇️ EXTRAER REPORTE AHORA";
         }
     </script>
 </body>

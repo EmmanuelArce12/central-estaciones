@@ -364,13 +364,43 @@ def lanzar():
 @login_required
 def api_res(fecha):
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
-    res = {k: {"monto":0.0,"horario":"-","cierres":0} for k in ["Mañana","Tarde","Noche"]}
+    
+    # Estructura para acumular datos
+    res = {
+        "Mañana": {"monto": 0.0, "min_time": None, "max_time": None},
+        "Tarde": {"monto": 0.0, "min_time": None, "max_time": None},
+        "Noche": {"monto": 0.0, "min_time": None, "max_time": None}
+    }
+    
     for r in reps:
         if r.turno in res: 
-            res[r.turno]["monto"]+=r.monto
-            res[r.turno]["cierres"]+=1
-    return jsonify([{"turno":k, "monto":v["monto"], "cantidad_cierres":v["cierres"]} for k,v in res.items()])
+            # Sumar monto
+            res[r.turno]["monto"] += r.monto
+            
+            # Calcular Apertura (Hora más temprana encontrada)
+            if res[r.turno]["min_time"] is None or r.hora_cierre < res[r.turno]["min_time"]:
+                res[r.turno]["min_time"] = r.hora_cierre
+                
+            # Calcular Cierre (Hora más tardía encontrada)
+            if res[r.turno]["max_time"] is None or r.hora_cierre > res[r.turno]["max_time"]:
+                res[r.turno]["max_time"] = r.hora_cierre
 
+    # Formatear salida para el JSON
+    salida = []
+    for turno, datos in res.items():
+        horario_txt = "Sin datos"
+        if datos["min_time"] and datos["max_time"]:
+            apertura = datos["min_time"].strftime("%H:%M:%S")
+            cierre = datos["max_time"].strftime("%H:%M:%S")
+            horario_txt = f"{apertura} a {cierre}"
+            
+        salida.append({
+            "turno": turno,
+            "monto": datos["monto"],
+            "horario_real": horario_txt
+        })
+        
+    return jsonify(salida)
 @app.route('/admin/api/status-all')
 @login_required
 def admin_status_all():
