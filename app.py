@@ -398,10 +398,9 @@ def reparar_horarios_db():
 def ver_ventas_vendedor():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     
-    # 1. Obtener las reglas de juego (Horarios de los turnos) desde Reportes
+    # 1. Obtener horarios de referencia
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     
-    # Estructura para saber a qué hora abrió y cerró realmente cada turno ese día
     limites_turnos = {
         "Mañana": {"inicio": None, "fin": None},
         "Tarde": {"inicio": None, "fin": None},
@@ -410,7 +409,6 @@ def ver_ventas_vendedor():
     
     for r in reportes:
         if r.turno in limites_turnos:
-            # Buscamos los extremos (si hubo varios cierres, tomamos el rango total)
             if r.hora_apertura:
                 t_ini = r.hora_apertura.time()
                 if limites_turnos[r.turno]["inicio"] is None or t_ini < limites_turnos[r.turno]["inicio"]:
@@ -421,67 +419,73 @@ def ver_ventas_vendedor():
                 if limites_turnos[r.turno]["fin"] is None or t_fin > limites_turnos[r.turno]["fin"]:
                     limites_turnos[r.turno]["fin"] = t_fin
 
-    # 2. Traer las ventas cargadas del Excel
+    # 2. Traer ventas
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
     
-    # 3. Clasificación: Crear las cajas para cada turno
-    ventas_por_turno = {
-        "Mañana": [],
-        "Tarde": [],
-        "Noche": [],
-        "Sin Asignar": [] # Por si alguno queda fuera de rango
+    # 3. Clasificación y Agrupación Jerárquica
+    # Estructura: { "Mañana": { "Juan": {'total': 100, 'items': [...]}, ... }, ... }
+    datos_agrupados = {
+        "Mañana": {},
+        "Tarde": {},
+        "Noche": {},
+        "Sin Asignar": {}
     }
     
-    total_litros = 0
-    total_plata = 0
+    total_litros_dia = 0
+    total_plata_dia = 0
 
     for v in ventas:
-        total_litros += v.litros
-        total_plata += v.monto
-        asignado = False
+        total_litros_dia += v.litros
+        total_plata_dia += v.monto
         
+        # --- Determinar Turno ---
+        turno_asignado = "Sin Asignar"
         try:
-            # Convertimos el horario del vendedor a objeto time para comparar
-            if not v.primer_horario or v.primer_horario == '-':
-                raise ValueError("Sin hora")
+            if not v.primer_horario or v.primer_horario == '-': raise ValueError
             hora_venta = datetime.strptime(v.primer_horario, "%H:%M:%S").time()
-        except:
-            ventas_por_turno["Sin Asignar"].append(v)
-            continue
-
-        # El Gran Filtro: Probamos si entra en algún turno detectado
-        for nombre_turno, limites in limites_turnos.items():
-            ini = limites["inicio"]
-            fin = limites["fin"]
             
-            if ini and fin:
-                # Caso Normal (Ej: Mañana 06:00 a 14:00) -> La hora debe estar en el medio
-                if ini < fin:
-                    if ini <= hora_venta <= fin:
-                        ventas_por_turno[nombre_turno].append(v)
-                        asignado = True
-                        break
-                # Caso Noche/Cruce (Ej: 22:00 a 06:00) -> La hora es mayor al inicio O menor al fin
-                else:
-                    if hora_venta >= ini or hora_venta <= fin:
-                        ventas_por_turno[nombre_turno].append(v)
-                        asignado = True
-                        break
+            asignado = False
+            for nombre_turno, limites in limites_turnos.items():
+                ini, fin = limites["inicio"], limites["fin"]
+                if ini and fin:
+                    if ini < fin: # Rango normal
+                        if ini <= hora_venta <= fin:
+                            turno_asignado = nombre_turno
+                            asignado = True; break
+                    else: # Cruce medianoche
+                        if hora_venta >= ini or hora_venta <= fin:
+                            turno_asignado = nombre_turno
+                            asignado = True; break
+            
+            if not asignado: # Fallback por hora fija
+                h = hora_venta.hour
+                if 6 <= h < 14: turno_asignado = "Mañana"
+                elif 14 <= h < 22: turno_asignado = "Tarde"
+                else: turno_asignado = "Noche"
+        except:
+            pass
+
+        # --- Agrupar por Vendedor dentro del Turno ---
+        if v.vendedor not in datos_agrupados[turno_asignado]:
+            datos_agrupados[turno_asignado][v.vendedor] = {
+                'items': [],
+                'subtotal_plata': 0.0,
+                'subtotal_litros': 0.0
+            }
         
-        # Si no coincidió con los horarios exactos del reporte (o no hay reporte), usamos lógica por defecto
-        if not asignado:
-            h = hora_venta.hour
-            if 6 <= h < 14: ventas_por_turno["Mañana"].append(v)
-            elif 14 <= h < 22: ventas_por_turno["Tarde"].append(v)
-            else: ventas_por_turno["Noche"].append(v)
+        # Agregar datos
+        datos = datos_agrupados[turno_asignado][v.vendedor]
+        datos['items'].append(v)
+        datos['subtotal_plata'] += v.monto
+        datos['subtotal_litros'] += v.litros
 
     return render_template('ventas_vendedor.html', 
-                           ventas_por_turno=ventas_por_turno, 
+                           datos_agrupados=datos_agrupados, 
                            fecha=fecha, 
-                           t_litros=total_litros, 
-                           t_plata=total_plata,
+                           t_litros=total_litros_dia, 
+                           t_plata=total_plata_dia,
                            limites=limites_turnos,
-                           user=current_user)# ----------------------------------
+                           user=current_user)
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():

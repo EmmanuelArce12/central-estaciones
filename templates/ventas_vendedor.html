@@ -10,95 +10,82 @@
         /* CABECERA */
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
-        
-        .btn-back { 
-            text-decoration: none; color: #555; font-weight: bold; 
-            border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; 
-            background: white; transition: 0.2s;
-        }
+        .btn-back { text-decoration: none; color: #555; border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; background: white; transition: 0.2s; font-weight: bold;}
         .btn-back:hover { background: #e9ecef; }
         
-        /* ALERTAS (Mensajes del servidor) */
+        /* ALERTAS */
         .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; border: 1px solid transparent; }
         .alert-success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
         .alert-warning { background-color: #fff3cd; color: #856404; border-color: #ffeeba; }
         .alert-error { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
 
-        /* BARRA DE CONTROL */
-        .control-bar {
-            display: flex; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; align-items: stretch;
-        }
-
-        /* Tarjeta Izquierda: BUSCADOR */
-        .search-card {
-            background: white; padding: 20px; border-radius: 12px; 
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; flex-direction: column; 
-            justify-content: center; flex: 1; min-width: 200px;
-        }
-
-        /* Tarjeta Derecha: SUBIDA (Destacada) */
-        .upload-card { 
-            background: white; padding: 20px; border-radius: 12px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; align-items: flex-end; gap: 15px;
-            flex: 2; border-left: 5px solid #28a745;
-        }
-
+        /* CONTROLES */
+        .control-bar { display: flex; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }
+        .search-card, .upload-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; gap: 10px; align-items: flex-end; }
+        .upload-card { border-left: 5px solid #28a745; flex-grow: 1; }
         .form-group { display: flex; flex-direction: column; width: 100%; }
-        label { font-size: 0.9rem; color: #666; margin-bottom: 8px; font-weight: bold; }
-        input { padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
-        
-        button { 
-            background-color: #28a745; color: white; border: none; 
-            padding: 12px 25px; border-radius: 6px; cursor: pointer; 
-            font-weight: bold; font-size: 14px; transition: 0.2s; white-space: nowrap;
-        }
+        label { font-size: 0.9rem; font-weight: bold; color: #666; margin-bottom: 5px; }
+        input { padding: 10px; border-radius: 6px; border: 1px solid #ccc; }
+        button { background-color: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
         button:hover { background-color: #218838; }
 
-        /* ESTILOS POR TURNO (Encabezados de las tablas) */
-        .turno-section { margin-bottom: 30px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
-        .turno-header { padding: 15px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
+        /* --- ESTILOS DEL ACORDEÓN --- */
+        .turno-section { margin-bottom: 40px; }
         
+        .turno-header { 
+            padding: 15px 20px; color: white; border-radius: 8px; margin-bottom: 10px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
         .Mañana .turno-header { background: linear-gradient(to right, #f1c40f, #d4ac0d); }
         .Tarde .turno-header { background: linear-gradient(to right, #e67e22, #d35400); }
         .Noche .turno-header { background: linear-gradient(to right, #2c3e50, #1a252f); }
         .Sin.Asignar .turno-header { background: #95a5a6; }
+        
+        .turno-title { font-size: 1.3rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
 
-        .turno-title { font-size: 1.2rem; font-weight: bold; text-transform: uppercase; }
-        .turno-horario { font-size: 0.9rem; opacity: 0.9; }
+        /* ITEM VENDEDOR (CABECERA DESPLEGABLE) */
+        .vendedor-item { background: white; border-radius: 8px; margin-bottom: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        
+        .vendedor-summary {
+            padding: 15px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+            background: white; transition: background 0.2s; border-left: 5px solid transparent;
+        }
+        .vendedor-summary:hover { background-color: #f8f9fa; }
+        .Mañana .vendedor-summary { border-left-color: #f1c40f; }
+        .Tarde .vendedor-summary { border-left-color: #e67e22; }
+        .Noche .vendedor-summary { border-left-color: #2c3e50; }
 
-        /* TABLA DE DATOS */
-        table { width: 100%; border-collapse: collapse; }
-        
-        th { text-align: left; padding: 12px 15px; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; border-bottom: 2px solid #eee; color: #555; background-color: #fff; }
-        
-        td { padding: 12px 15px; border-bottom: 1px solid #eee; color: #333; font-size: 0.95rem; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover { background-color: #f9f9f9; }
-        
-        .vendedor-col { font-weight: bold; color: #2c3e50; }
-        .producto-col { color: #555; font-weight: 600; }
-        .monto-col { font-weight: bold; color: #28a745; font-family: monospace; font-size: 1rem; }
-        .litros-col { color: #007bff; font-family: monospace; font-size: 1rem; }
-        .meta-col { font-size: 0.85rem; color: #888; }
-        
-        /* FOOTER TOTALES GLOBALES */
-        .totales-globales { 
-            display: flex; gap: 20px; margin-top: 40px; padding-top: 20px; 
-            border-top: 2px dashed #ccc; justify-content: flex-end; 
+        .v-name { font-size: 1.1rem; font-weight: bold; color: #333; display: flex; align-items: center; gap: 10px; }
+        .v-total { font-size: 1.1rem; font-weight: bold; color: #28a745; background: #e8f5e9; padding: 5px 15px; border-radius: 20px; }
+        .flecha { transition: transform 0.3s; font-size: 0.8rem; color: #999; }
+
+        /* CONTENIDO OCULTO (TABLA) */
+        .vendedor-details {
+            max-height: 0; overflow: hidden; transition: max-height 0.4s ease-out; background-color: #fafafa;
         }
-        .total-card { 
-            padding: 15px 30px; border-radius: 10px; text-align: center; color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 150px;
-        }
-        .bg-blue { background: linear-gradient(135deg, #007bff, #0056b3); }
-        .bg-green { background: linear-gradient(135deg, #28a745, #218838); }
         
+        /* CLASE ACTIVA (ABIERTO) */
+        .vendedor-item.active .vendedor-details { max-height: 500px; /* Altura suficiente para mostrar contenido */ }
+        .vendedor-item.active .flecha { transform: rotate(180deg); }
+        .vendedor-item.active .vendedor-summary { background-color: #f1f3f5; }
+
+        /* TABLA INTERNA */
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.9rem; }
+        th { text-align: left; padding: 10px 20px; color: #888; border-bottom: 1px solid #ddd; font-size: 0.8rem; text-transform: uppercase; }
+        td { padding: 10px 20px; border-bottom: 1px solid #eee; color: #555; }
+        
+        .sub-name { color: #aaa; font-weight: 500; font-size: 0.85rem; font-style: italic; } /* Nombre grisáceo */
+        .col-monto { font-weight: bold; color: #28a745; }
+        .col-litros { font-family: monospace; color: #007bff; }
+
+        /* FOOTER GLOBAL */
+        .totales-globales { display: flex; gap: 20px; margin-top: 40px; padding-top: 20px; border-top: 2px dashed #ccc; justify-content: flex-end; }
+        .total-card { padding: 15px 30px; border-radius: 10px; text-align: center; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .bg-blue { background: #007bff; }
+        .bg-green { background: #28a745; }
         .total-label { font-size: 0.8rem; opacity: 0.9; margin-bottom: 5px; text-transform: uppercase; }
-        .total-value { font-size: 1.6rem; font-weight: bold; }
-        
-        /* ESTADO VACÍO */
-        .empty-state { text-align: center; padding: 50px 20px; color: #888; }
-        .empty-icon { font-size: 3rem; margin-bottom: 15px; display: block; }
+        .total-value { font-size: 1.8rem; font-weight: bold; }
 
     </style>
 </head>
@@ -112,7 +99,7 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="alert {% if category == 'error' %}alert-error{% elif category == 'warning' %}alert-warning{% else %}alert-success{% endif %}">
+          <div class="alert {% if category=='error' %}alert-error{% elif category=='warning' %}alert-warning{% else %}alert-success{% endif %}">
               {{ message }}
           </div>
         {% endfor %}
@@ -121,85 +108,109 @@
 
     <div class="control-bar">
         <div class="search-card">
-            <label>📅 Consultar fecha:</label>
+            <label>📅 Ver fecha:</label>
             <input type="date" id="fechaSelector" value="{{ fecha }}">
         </div>
-
         <form action="/estacion/subir-ventas-vendedor" method="POST" enctype="multipart/form-data" class="upload-card">
             <div class="form-group">
-                <label>📂 Cargar Nuevo Reporte (Excel):</label>
+                <label>📂 Cargar Excel:</label>
                 <input type="file" name="archivo" accept=".xlsx, .xls" required>
             </div>
-            <button type="submit">⬆️ Procesar Archivo</button>
+            <button type="submit">⬆️ Procesar</button>
         </form>
     </div>
 
-    {% set hay_datos = false %}
     {% for turno in ['Mañana', 'Tarde', 'Noche', 'Sin Asignar'] %}
-        {% if ventas_por_turno[turno] %}
-            {% set hay_datos = true %}
+        {% if datos_agrupados[turno] %}
             <div class="turno-section {{ turno }}">
+                
                 <div class="turno-header">
                     <span class="turno-title">{{ turno }}</span>
                     {% if limites[turno] and limites[turno]['inicio'] %}
-                        <span class="turno-horario">
-                            Horario detectado: {{ limites[turno]['inicio'].strftime('%H:%M') }} a {{ limites[turno]['fin'].strftime('%H:%M') }}
+                        <span style="opacity:0.9; font-size:0.9rem">
+                            ⏰ {{ limites[turno]['inicio'].strftime('%H:%M') }} a {{ limites[turno]['fin'].strftime('%H:%M') }}
                         </span>
                     {% endif %}
                 </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Vendedor</th>
-                            <th>Producto</th>
-                            <th>Inicio</th>
-                            <th>Precio</th>
-                            <th>Litros</th>
-                            <th>Total ($)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for v in ventas_por_turno[turno] %}
-                        <tr>
-                            <td class="vendedor-col">{{ v.vendedor }}</td>
-                            <td class="producto-col">{{ v.combustible }}</td>
-                            <td class="meta-col">{{ v.primer_horario }}</td>
-                            <td class="meta-col">$ {{ "{:,.2f}".format(v.precio) }}</td>
-                            <td class="litros-col">{{ "{:,.2f}".format(v.litros) }} L</td>
-                            <td class="monto-col">$ {{ "{:,.2f}".format(v.monto) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+
+                {% for vendedor, datos in datos_agrupados[turno].items() %}
+                    <div class="vendedor-item" onclick="toggleDetails(this)">
+                        
+                        <div class="vendedor-summary">
+                            <div class="v-name">
+                                <span class="flecha">▼</span> 
+                                {{ vendedor }}
+                            </div>
+                            <div class="v-total">
+                                $ {{ "{:,.2f}".format(datos.subtotal_plata) }}
+                            </div>
+                        </div>
+
+                        <div class="vendedor-details">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Vendedor</th> <th>Producto</th>
+                                        <th>Hora</th>
+                                        <th>Precio</th>
+                                        <th>Litros</th>
+                                        <th>Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in datos.items %}
+                                    <tr>
+                                        <td class="sub-name">{{ item.vendedor }}</td> <td style="font-weight:600">{{ item.combustible }}</td>
+                                        <td>{{ item.primer_horario }}</td>
+                                        <td>$ {{ "{:,.2f}".format(item.precio) }}</td>
+                                        <td class="col-litros">{{ "{:,.2f}".format(item.litros) }} L</td>
+                                        <td class="col-monto">$ {{ "{:,.2f}".format(item.monto) }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                {% endfor %}
+
             </div>
         {% endif %}
     {% endfor %}
 
-    {% if t_litros > 0 or hay_datos %}
+    {% if t_plata > 0 %}
         <div class="totales-globales">
             <div class="total-card bg-blue">
-                <div class="total-label">Total Litros (Día)</div>
+                <div class="total-label">Litros Totales</div>
                 <div class="total-value">{{ "{:,.2f}".format(t_litros) }} L</div>
             </div>
             <div class="total-card bg-green">
-                <div class="total-label">Total Dinero (Día)</div>
+                <div class="total-label">Recaudación Total</div>
                 <div class="total-value">$ {{ "{:,.2f}".format(t_plata) }}</div>
             </div>
         </div>
     {% else %}
-        <div class="empty-state">
-            <span class="empty-icon">📅</span>
-            <h3>No hay datos visualizados para el {{ fecha }}</h3>
-            <p>Usa el calendario de la izquierda para buscar otro día, <br>o sube un archivo Excel a la derecha para cargar datos nuevos.</p>
+        <div style="text-align: center; padding: 50px; color: #999;">
+            <h3>📭 Sin datos</h3>
+            <p>No hay información cargada para esta fecha.</p>
         </div>
     {% endif %}
 
     <script>
-        // Recargar página automáticamente cuando se cambia la fecha de VISUALIZACIÓN
-        document.getElementById('fechaSelector').addEventListener('change', (e) => {
-            if (e.target.value) {
-                window.location.href = `/estacion/ventas-vendedor?fecha=${e.target.value}`;
+        // Lógica del Acordeón
+        function toggleDetails(element) {
+            // Cierra otros abiertos si quieres efecto "uno a la vez" (Opcional, aquí desactivado para permitir varios)
+            // element.classList.toggle('active');
+            
+            // Si quieres que se cierre si clickeas de nuevo:
+            if (element.classList.contains('active')) {
+                element.classList.remove('active');
+            } else {
+                element.classList.add('active');
             }
+        }
+
+        document.getElementById('fechaSelector').addEventListener('change', (e) => {
+            if (e.target.value) window.location.href = `/estacion/ventas-vendedor?fecha=${e.target.value}`;
         });
     </script>
 
