@@ -4,183 +4,202 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel Superadmin - Central VOX</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h1, h2 { color: #333; }
         
         /* Mensajes */
         .alert { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 20px; }
         .alert-error { background-color: #f8d7da; color: #721c24; }
 
-        /* Formularios */
+        /* Formularios y Tarjetas */
         .card { background: #fafafa; border: 1px solid #ddd; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
         .form-group { margin-bottom: 10px; }
         label { display: block; font-weight: bold; margin-bottom: 5px; }
         input, select { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-        button { cursor: pointer; padding: 8px 15px; border: none; border-radius: 4px; font-weight: bold; }
-        .btn-primary { background-color: #007bff; color: white; }
-        .btn-danger { background-color: #dc3545; color: white; }
-        .btn-warning { background-color: #ffc107; color: black; }
         
+        /* Botones Generales */
+        button { cursor: pointer; padding: 8px 15px; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-warning { background-color: #ffc107; color: #333; }
+        
+        /* Botones de Icono (Tabla) */
+        .btn-icon { padding: 6px 10px; font-size: 1rem; margin: 0 2px; }
+        .btn-trash { background-color: #ffebee; color: #c62828; }
+        .btn-trash:hover { background-color: #ffcdd2; }
+        .btn-unlink { background-color: #fff3e0; color: #ef6c00; }
+        .btn-unlink:hover { background-color: #ffe0b2; }
+
         /* Tabla */
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
-        th { background-color: #f8f9fa; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; vertical-align: middle; }
+        th { background-color: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.85rem; }
         
-        /* ESTADOS Y ANIMACIONES */
-        .status-online { color: green; font-weight: bold; display: flex; align-items: center; gap: 5px; }
-        .status-offline { color: red; font-weight: bold; }
-        
-        .status-waiting { 
-            color: #d39e00; 
-            font-weight: bold; 
-            background: #fff3cd;
-            padding: 5px 10px;
-            border-radius: 20px;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            border: 1px solid #ffeeba;
-        }
+        /* ESTADOS DE CONEXIÓN */
+        .badge { padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; }
+        .status-online { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .status-offline { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .status-waiting { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
 
-        /* Relojito girando */
+        /* TOKEN BOX (Estilo nuevo para el Token) */
+        .token-container { 
+            display: flex; align-items: center; gap: 8px; 
+            background: #f1f3f4; padding: 5px 10px; border-radius: 6px; border: 1px dashed #ccc; 
+            font-family: monospace; color: #555; max-width: 220px;
+        }
+        .btn-copy { 
+            background: none; border: none; color: #007bff; cursor: pointer; font-size: 1.1rem; padding: 0;
+        }
+        .btn-copy:hover { color: #0056b3; transform: scale(1.1); }
+
+        /* CÓDIGO GRANDE */
+        .pairing-code { font-size: 1.1rem; font-weight: bold; color: #e67e22; letter-spacing: 1px; }
+
+        /* Animaciones */
         .spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid #d39e00;
-            border-top: 2px solid transparent;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
+            width: 12px; height: 12px; border: 2px solid #856404; border-top: 2px solid transparent;
+            border-radius: 50%; animation: spin 1s linear infinite;
         }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        .code-display { font-family: monospace; font-size: 1.2em; color: #333; margin-top: 4px; display: block; }
-        .badge-new { background: #28a745; color: white; font-size: 0.7em; padding: 2px 5px; border-radius: 4px; animation: pulse 2s infinite; }
-
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; }
+        .dot-green { background-color: #2e7d32; }
+        .dot-red { background-color: #c62828; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h1>Panel de Control (Superadmin)</h1>
-        <a href="/logout" style="color:red; text-decoration:none;">Cerrar Sesión</a>
+        <h1>🛡️ Panel Superadmin</h1>
+        <a href="/logout" style="color:#c62828; font-weight:bold; text-decoration:none;"><i class="fa-solid fa-sign-out-alt"></i> Cerrar Sesión</a>
     </div>
 
-    <!-- Mostrar Mensajes -->
     {% if msg %}
         <div class="alert {% if '❌' in msg %}alert-error{% endif %}">
             {{ msg }}
         </div>
     {% endif %}
 
-    <!-- CREAR NUEVA ESTACIÓN -->
-    <div class="card">
-        <h2>➕ Crear Nueva Estación</h2>
-        <form method="POST">
-            <input type="hidden" name="create_user" value="1">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div class="form-group">
-                    <label>Usuario:</label>
-                    <input type="text" name="username" required placeholder="ej: estacion1">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div class="card">
+            <h3 style="margin-top:0"><i class="fa-solid fa-user-plus"></i> Nueva Estación</h3>
+            <form method="POST">
+                <input type="hidden" name="create_user" value="1">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group"><label>Usuario:</label><input type="text" name="username" required></div>
+                    <div class="form-group"><label>Clave:</label><input type="text" name="password" required></div>
+                    <div class="form-group"><label>Nombre Fantasía:</label><input type="text" name="nombre"></div>
+                    <div class="form-group"><label>Rol:</label>
+                        <select name="role">
+                            <option value="estacion">Estación</option>
+                            <option value="superadmin">Administrador</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Contraseña:</label>
-                    <input type="text" name="password" required placeholder="clave">
-                </div>
-                <div class="form-group">
-                    <label>Nombre Fantasía:</label>
-                    <input type="text" name="nombre" placeholder="ej: Shell Ruta 2">
-                </div>
-                <div class="form-group">
-                    <label>Rol:</label>
-                    <select name="role">
-                        <option value="estacion">Estación</option>
-                        <option value="superadmin">Administrador</option>
+                <button type="submit" class="btn-primary" style="width:100%"><i class="fa-solid fa-save"></i> Crear Usuario</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top:0"><i class="fa-solid fa-link"></i> Vinculación Manual</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Úsalo si el código automático falla.</p>
+            <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
+                <input type="hidden" name="link_pc" value="1">
+                <div style="flex-grow:1">
+                    <label>Estación:</label>
+                    <select name="user_id">
+                        {% for u in users %}
+                            {% if u.role != 'superadmin' %}
+                                <option value="{{ u.id }}">{{ u.username }}</option>
+                            {% endif %}
+                        {% endfor %}
                     </select>
                 </div>
-            </div>
-            <button type="submit" class="btn-primary" style="width:100%; margin-top:10px;">Crear Usuario</button>
-        </form>
+                <div style="width:120px">
+                    <label>Código:</label>
+                    <input type="text" name="pairing_code" placeholder="AAA-00">
+                </div>
+                <button type="submit" class="btn-warning"><i class="fa-solid fa-bolt"></i> Forzar</button>
+            </form>
+        </div>
     </div>
 
-    <!-- VINCULACIÓN MANUAL -->
-    <div class="card">
-        <h2>🔗 Vinculación Manual (Si el automático falla)</h2>
-        <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
-            <input type="hidden" name="link_pc" value="1">
-            <div style="flex-grow:1">
-                <label>Seleccionar Usuario:</label>
-                <select name="user_id">
-                    {% for u in users %}
-                        {% if u.role != 'superadmin' %}
-                            <option value="{{ u.id }}">{{ u.username }} ({{ u.cliente_info.nombre_fantasia if u.cliente_info else '-' }})</option>
-                        {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
-            <div style="flex-grow:1">
-                <label>Código que muestra la PC (AAA-BB):</label>
-                <input type="text" name="pairing_code" placeholder="ej: 3KW-R5">
-            </div>
-            <button type="submit" class="btn-warning">Forzar Código</button>
-        </form>
-    </div>
-
-    <!-- LISTA DE USUARIOS -->
-    <h2>📡 Estado de Estaciones <span id="loading-indicator" style="font-size:0.5em; color:gray;">(Actualizando...)</span></h2>
+    <h2 style="margin-top:30px;">
+        📡 Estado de Estaciones 
+        <span id="loading-indicator" style="font-size:0.5em; color:#bbb; font-weight:normal; opacity:0; transition:opacity 0.5s;">
+            <i class="fa-solid fa-sync fa-spin"></i> Actualizando...
+        </span>
+    </h2>
+    
     <table>
         <thead>
             <tr>
-                <th>ID</th>
-                <th>Estación / Usuario</th>
+                <th style="width: 50px;">ID</th>
+                <th>Estación / Cliente</th>
                 <th>Estado Conexión</th>
-                <th>Última Señal</th>
+                <th>Vinculación / Token</th> <th>Última Señal</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody id="users-table-body">
-            <!-- SE LLENA CON JAVASCRIPT PERO DEJAMOS BASE POR SI ACASO -->
             {% for u in users %}
             <tr id="row-{{ u.id }}">
                 <td>{{ u.id }}</td>
                 <td>
-                    <strong>{{ u.username }}</strong><br>
-                    <small style="color:gray;">{{ u.cliente_info.nombre_fantasia if u.cliente_info else u.role }}</small>
+                    <div style="font-weight:bold; font-size:1rem;">{{ u.username }}</div>
+                    <div style="font-size:0.85rem; color:#777;">
+                        <i class="fa-solid fa-store"></i> {{ u.cliente_info.nombre_fantasia if u.cliente_info else u.role }}
+                    </div>
                 </td>
+                
                 <td id="status-cell-{{ u.id }}">
-                    <!-- Estado inicial (server side render) -->
                     {% if u.status_conexion == 'online' %}
-                        <span class="status-online">● ONLINE</span>
+                        <span class="badge status-online"><span class="dot dot-green"></span> ONLINE</span>
                     {% elif u.status_conexion == 'waiting' %}
-                        <div class="status-waiting">
-                            <div class="spinner"></div>
-                            Esperando PC...
-                        </div>
-                        <span class="code-display">{{ u.device_pairing_code }}</span>
+                        <span class="badge status-waiting"><div class="spinner"></div> ESPERANDO</span>
                     {% else %}
-                        <span class="status-offline">● OFFLINE</span>
+                        <span class="badge status-offline"><span class="dot dot-red"></span> OFFLINE</span>
                     {% endif %}
                 </td>
-                <td id="time-cell-{{ u.id }}">
-                    {{ u.last_check.strftime('%d/%m %H:%M:%S') if u.last_check else 'Nunca' }}
+
+                <td id="auth-cell-{{ u.id }}">
+                    {% if u.api_token %}
+                        <div class="token-container">
+                            <i class="fa-solid fa-key" style="font-size:0.8rem; color:#aaa;"></i>
+                            <span>Token Activo</span>
+                            <button class="btn-copy" onclick="copiarToken('{{ u.api_token }}')" title="Copiar Token">
+                                <i class="fa-regular fa-copy"></i>
+                            </button>
+                        </div>
+                    {% elif u.device_pairing_code %}
+                        <span class="pairing-code">{{ u.device_pairing_code }}</span>
+                    {% else %}
+                        <span style="color:#ccc; font-style:italic;">Sin vincular</span>
+                    {% endif %}
                 </td>
+
+                <td id="time-cell-{{ u.id }}" style="font-size:0.9rem;">
+                    {{ u.last_check.strftime('%d/%m %H:%M') if u.last_check else '-' }}
+                </td>
+
                 <td>
-                    <div style="display:flex; gap: 5px;">
+                    <div style="display:flex;">
                         <form method="POST" style="display:inline;">
                             <input type="hidden" name="user_id" value="{{ u.id }}">
                             <input type="hidden" name="revoke" value="1">
-                            <button type="submit" class="btn-warning" title="Desconectar" style="font-size:0.8em; padding:5px;">🔌</button>
+                            <button type="submit" class="btn-icon btn-unlink" title="Desvincular PC">
+                                <i class="fa-solid fa-plug-circle-xmark"></i>
+                            </button>
                         </form>
                         {% if u.id != current_user.id %}
-                        <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿Eliminar?');" style="display:inline;">
-                            <button type="submit" class="btn-danger" title="Eliminar" style="font-size:0.8em; padding:5px;">🗑️</button>
+                        <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿Eliminar esta estación y todos sus datos?');" style="display:inline;">
+                            <button type="submit" class="btn-icon btn-trash" title="Eliminar Estación">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
                         </form>
                         {% endif %}
                     </div>
@@ -191,53 +210,71 @@
     </table>
 </div>
 
-<!-- SCRIPT DE ACTUALIZACIÓN AUTOMÁTICA -->
 <script>
+    // Función para copiar al portapapeles
+    function copiarToken(token) {
+        navigator.clipboard.writeText(token).then(() => {
+            // Feedback visual simple
+            alert("✅ ¡Token copiado!\nPégalo en el instalador de Agente Tiradas.");
+        }).catch(err => {
+            console.error('Error al copiar: ', err);
+        });
+    }
+
+    // Polling para actualizar tabla sin recargar
     function updateStatus() {
         fetch('/admin/api/status-all')
             .then(response => response.json())
             .then(data => {
+                // Indicador visual de carga
                 const indicator = document.getElementById('loading-indicator');
                 indicator.style.opacity = '1';
-                setTimeout(() => indicator.style.opacity = '0', 500);
+                setTimeout(() => indicator.style.opacity = '0', 800);
 
                 data.forEach(user => {
                     const statusCell = document.getElementById(`status-cell-${user.id}`);
+                    const authCell = document.getElementById(`auth-cell-${user.id}`); // Celda del Token
                     const timeCell = document.getElementById(`time-cell-${user.id}`);
                     
-                    if (statusCell && timeCell) {
-                        // Actualizar Hora
+                    if (statusCell && authCell) {
+                        // 1. Actualizar Hora
                         timeCell.innerText = user.last_check;
 
-                        // Actualizar Estado Visualmente
+                        // 2. Actualizar Estado (Online/Offline)
                         let htmlStatus = '';
                         if (user.status === 'online') {
-                            htmlStatus = `<span class="status-online">● ONLINE <span class="badge-new">LIVE</span></span>`;
+                            htmlStatus = `<span class="badge status-online"><span class="dot dot-green"></span> ONLINE</span>`;
                         } else if (user.status === 'waiting') {
-                            htmlStatus = `
-                                <div class="status-waiting">
-                                    <div class="spinner"></div>
-                                    Esperando PC...
-                                </div>
-                                <span class="code-display">${user.code}</span>
-                            `;
+                            htmlStatus = `<span class="badge status-waiting"><div class="spinner"></div> ESPERANDO</span>`;
                         } else {
-                            htmlStatus = `<span class="status-offline">● OFFLINE</span>`;
+                            htmlStatus = `<span class="badge status-offline"><span class="dot dot-red"></span> OFFLINE</span>`;
+                        }
+                        if (statusCell.innerHTML.trim() !== htmlStatus.trim()) statusCell.innerHTML = htmlStatus;
+
+                        // 3. Actualizar Celda TOKEN / CÓDIGO (Lo más importante)
+                        let htmlAuth = '';
+                        if (user.token) {
+                            // Si el JSON trae token, mostramos el botón de copiar
+                            htmlAuth = `
+                                <div class="token-container">
+                                    <i class="fa-solid fa-key" style="font-size:0.8rem; color:#aaa;"></i>
+                                    <span>Token Activo</span>
+                                    <button class="btn-copy" onclick="copiarToken('${user.token}')" title="Copiar Token">
+                                        <i class="fa-regular fa-copy"></i>
+                                    </button>
+                                </div>`;
+                        } else if (user.code) {
+                            htmlAuth = `<span class="pairing-code">${user.code}</span>`;
+                        } else {
+                            htmlAuth = `<span style="color:#ccc; font-style:italic;">Sin vincular</span>`;
                         }
                         
-                        // Solo reemplazar si cambió para evitar parpadeos innecesarios
-                        if (statusCell.innerHTML.trim() !== htmlStatus.trim()) {
-                            statusCell.innerHTML = htmlStatus;
+                        // Solo actualizamos si cambió (para no romper el botón si estás intentando hacer click)
+                        // Comparamos longitudes simples para evitar re-render innecesario
+                        if (authCell.innerHTML.length !== htmlAuth.length) {
+                             authCell.innerHTML = htmlAuth;
                         }
                     }
                 });
             })
-            .catch(err => console.error("Error polling:", err));
-    }
-
-    // Ejecutar cada 2 segundos
-    setInterval(updateStatus, 2000);
-</script>
-
-</body>
-</html>
+            .catch(err => console.error

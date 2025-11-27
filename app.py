@@ -328,6 +328,90 @@ def lanzar():
     return jsonify({"status": "ok"})
 
 # --- API RESUMEN (MODIFICADA: Orden Fijo y Datos Completos) ---
+# --- EN APP.PY (Agregar junto a las otras APIs) ---
+
+# 1. BOTÓN GATILLO: El usuario presiona "Solicitar ingreso" en la web
+@app.route('/api/lanzar-tiradas', methods=['POST'])
+@login_required
+def lanzar_orden_tiradas():
+    # Cambiamos el comando pendiente. El agente leerá esto en su próximo "latido".
+    current_user.comando_pendiente = 'UPLOAD_TIRADAS'
+    db.session.commit()
+    return jsonify({"status": "ok"})
+
+# 2. API RECEPCIÓN: El agente envía el archivo aquí
+@app.route('/api/recepcion-tiradas', methods=['POST'])
+def api_recepcion_tiradas():
+    # Validar Token
+    token = request.headers.get('X-API-TOKEN')
+    user = User.query.filter_by(api_token=token).first()
+    if not user: return jsonify({"status": "error", "msg": "Token invalido"}), 401
+
+    if 'archivo' not in request.files:
+        return jsonify({"status": "error", "msg": "Sin archivo"}), 400
+
+    archivo = request.files['archivo']
+    try:
+        # Reutilizamos la lógica de Pandas (Importar difflib si no está arriba)
+        import difflib 
+        
+        # Leemos el CSV
+        try:
+            df = pd.read_csv(archivo)
+            if len(df.columns) < 2: df = pd.read_csv(archivo, sep=';')
+        except:
+            return jsonify({"status": "error", "msg": "Formato CSV invalido"}), 400
+
+        # Normalización columnas
+        df.columns = df.columns.astype(str).str.lower().str.strip()
+        col_monto = next((c for c in df.columns if 'monto' in c or 'importe' in c), None)
+        col_vend = next((c for c in df.columns if 'vendedor' in c or 'playero' in c or 'nombre' in c), None)
+        col_hora = next((c for c in df.columns if 'hora' in c), None)
+        col_turno = next((c for c in df.columns if 'turno' in c), None)
+        col_sector = next((c for c in df.columns if 'sector' in c), None)
+
+        if not col_monto or not col_vend:
+            return jsonify({"status": "error", "msg": "Columnas faltantes"}), 400
+
+        # Lógica de Nombres (Fuzzy Match)
+        fecha_hoy = datetime.now().strftime('%Y-%m-%d') # Asume fecha de hoy al subir
+        ventas_existentes = VentaVendedor.query.filter_by(user_id=user.id, fecha=fecha_hoy).all()
+        nombres_oficiales = list(set([v.vendedor for v in ventas_existentes]))
+
+        # Limpiamos tiradas anteriores del día para evitar duplicados masivos
+        # (Opcional: podrías no borrar si los CSV son incrementales)
+        Tirada.query.filter_by(user_id=user.id, fecha_operativa=fecha_hoy).delete()
+
+        count = 0
+        for _, row in df.iterrows():
+            nombre_csv = str(row[col_vend]).strip()
+            nombre_final = nombre_csv
+            if nombres_oficiales:
+                matches = difflib.get_close_matches(nombre_csv, nombres_oficiales, n=1, cutoff=0.4)
+                if matches: nombre_final = matches[0]
+
+            try:
+                monto_val = float(str(row[col_monto]).replace('$','').replace('.','').replace(',','.'))
+            except: monto_val = 0.0
+
+            nueva = Tirada(
+                user_id=user.id,
+                fecha_operativa=fecha_hoy,
+                vendedor=nombre_final,
+                vendedor_raw=nombre_csv,
+                monto=monto_val,
+                hora=str(row[col_hora]) if col_hora else "-",
+                turno=str(row[col_turno]) if col_turno else "-",
+                sector=str(row[col_sector]) if col_sector else "-"
+            )
+            db.session.add(nueva)
+            count += 1
+        
+        db.session.commit()
+        return jsonify({"status": "ok", "count": count}), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "msg": str(e)}), 500
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
@@ -382,10 +466,20 @@ def admin_status_all():
     ahora = datetime.now()
     for u in users:
         st = u.status_conexion
+        # Consideramos offline si no hubo latido en 120 segundos
         if u.last_check and (ahora - u.last_check).total_seconds() > 120: st = 'offline'
-        data.append({"id": u.id, "status": st, "code": u.device_pairing_code, "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca"})
+        
+        # AGREGAMOS "token": u.api_token PARA QUE EL FRONT LO MUESTRE
+        data.append({
+            "id": u.id, 
+            "username": u.username,
+            "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "Sin Nombre",
+            "status": st, 
+            "code": u.device_pairing_code, 
+            "token": u.api_token if u.api_token else None, # <--- ESTO ES NUEVO
+            "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca"
+        })
     return jsonify(data)
-
 # --- HERRAMIENTA CLI ---
 @app.cli.command("reparar-horarios")
 def reparar_horarios_db():
