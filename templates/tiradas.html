@@ -5,60 +5,104 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Tiradas (Sobres)</title>
     <style>
-        /* --- ESTILOS COMPARTIDOS (Mismo Look & Feel) --- */
+        /* --- ESTILOS GENERALES --- */
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; max-width: 1100px; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
-        .btn-back { text-decoration: none; color: #555; font-weight: bold; border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; background: white; transition: 0.2s; }
+        
+        .btn-back { 
+            text-decoration: none; color: #555; font-weight: bold; 
+            border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; 
+            background: white; transition: 0.2s;
+        }
         .btn-back:hover { background: #e9ecef; }
         
-        /* Alertas */
+        /* ALERTAS */
         .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; }
         .alert-success { background-color: #d4edda; color: #155724; }
         .alert-error { background-color: #f8d7da; color: #721c24; }
 
-        /* Controles */
-        .control-bar { display: flex; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }
-        .search-card, .upload-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .search-card { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-        .upload-card { flex: 2; display: flex; align-items: flex-end; gap: 15px; border-left: 5px solid #8e44ad; } /* Color Violeta para diferenciar de ventas */
-        
-        input, button { padding: 10px; border-radius: 6px; border: 1px solid #ccc; }
-        button { background-color: #8e44ad; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        button:hover { background-color: #732d91; }
+        /* --- BARRA DE CONTROL (TARJETAS SUPERIORES) --- */
+        .control-bar { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
+            gap: 20px; 
+            margin-bottom: 30px; 
+        }
 
-        /* --- ACORDEÓN DE TIRADAS --- */
+        /* Tarjeta Genérica */
+        .control-card {
+            background: white; padding: 20px; border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            display: flex; flex-direction: column; justify-content: center;
+        }
+
+        /* 1. Tarjeta Fecha */
+        .card-date { border-left: 5px solid #3498db; }
+
+        /* 2. Tarjeta Subida Manual (Violeta) */
+        .card-upload { border-left: 5px solid #8e44ad; }
+        
+        /* 3. Tarjeta Remota (Naranja) - NUEVA */
+        .card-remote { border-left: 5px solid #e67e22; }
+
+        label { font-size: 0.85rem; color: #666; margin-bottom: 8px; font-weight: bold; display: block; }
+        input[type="date"], input[type="file"] { width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
+
+        /* BOTONES */
+        button { 
+            width: 100%; padding: 10px; border: none; border-radius: 6px; 
+            font-weight: bold; cursor: pointer; color: white; margin-top: 10px;
+            transition: 0.2s; font-size: 0.9rem;
+        }
+        .btn-purple { background-color: #8e44ad; }
+        .btn-purple:hover { background-color: #732d91; }
+
+        .btn-orange { background-color: #e67e22; }
+        .btn-orange:hover { background-color: #d35400; }
+        .btn-orange:disabled { background-color: #f5c6cb; cursor: not-allowed; }
+
+        /* --- ANIMACIÓN DE CARGA (Igual al Dashboard) --- */
+        .progress-container { display: none; margin-top: 10px; }
+        .progress-bar-bg { background-color: #eee; border-radius: 10px; height: 10px; overflow: hidden; width: 100%; }
+        .progress-bar-fill {
+            height: 100%; background-color: #e67e22; width: 0%;
+            transition: width 0.5s ease;
+            background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+            background-size: 1rem 1rem;
+            animation: stripes 1s linear infinite;
+        }
+        @keyframes stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+        .status-text { font-size: 0.75rem; color: #e67e22; margin-top: 5px; text-align: center; font-weight: bold; }
+
+        /* --- ACORDEÓN DE DATOS --- */
         .main-container { background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); overflow: hidden; }
         
         .vendedor-group { border-bottom: 1px solid #eee; }
         
-        /* CABECERA (Lo que se ve siempre) */
         .vendedor-header {
             display: flex; justify-content: space-between; align-items: center;
-            padding: 20px 25px; cursor: pointer; background: white; transition: background 0.2s;
+            padding: 18px 25px; cursor: pointer; background: white; transition: background 0.2s;
         }
         .vendedor-header:hover { background-color: #fcfcfc; }
-        .vendedor-header.active { background-color: #f3e5f5; border-left: 4px solid #8e44ad; } /* Violeta suave */
+        .vendedor-header.active { background-color: #fbf6ff; border-left: 4px solid #8e44ad; }
 
-        .vh-left { display: flex; align-items: center; gap: 15px; }
+        .vh-left { display: flex; align-items: center; gap: 10px; }
         .arrow-icon { font-size: 0.8rem; color: #aaa; transition: transform 0.3s; }
         .vendedor-header.active .arrow-icon { transform: rotate(90deg); color: #8e44ad; }
         
         .vh-name { font-size: 1.1rem; font-weight: 800; color: #2c3e50; text-transform: capitalize; }
-        .vh-meta { font-size: 0.85rem; color: #7f8c8d; font-weight: normal; margin-left: 10px; }
-
         .vh-right { text-align: right; }
-        .vh-total { font-size: 1.2rem; font-weight: 800; color: #27ae60; } /* Verde dinero */
+        .vh-total { font-size: 1.1rem; font-weight: 800; color: #27ae60; }
         .vh-count { font-size: 0.8rem; color: #7f8c8d; font-weight: 600; text-transform: uppercase; }
 
-        /* DETALLE (Tabla oculta) */
+        /* DETALLE OCULTO */
         .vendedor-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background-color: #fafafa; }
-        
         .detail-table { width: 100%; border-collapse: collapse; }
         .detail-table th { text-align: left; padding: 10px 25px; font-size: 0.75rem; text-transform: uppercase; color: #aaa; border-bottom: 1px solid #eee; }
         .detail-table td { padding: 10px 25px; color: #7f8c8d; font-size: 0.9rem; border-bottom: 1px dashed #eee; }
-        
-        /* TOTALES GLOBALES */
+
+        /* TOTALES */
         .totales-bar { display: flex; gap: 20px; justify-content: flex-end; margin-top: 30px; }
         .total-badge { padding: 15px 25px; border-radius: 8px; color: white; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .bg-purple { background: linear-gradient(135deg, #8e44ad, #9b59b6); }
@@ -86,19 +130,33 @@
     {% endwith %}
 
     <div class="control-bar">
-        <div class="search-card">
+        
+        <div class="control-card card-date">
             <label>📅 Ver fecha:</label>
             <input type="date" id="fechaSelector" value="{{ fecha }}">
         </div>
 
-        <form action="/estacion/subir-tiradas" method="POST" enctype="multipart/form-data" class="upload-card">
-            <div style="display:flex; flex-direction:column; width:100%">
-                <label>📂 Subir CSV de Sobres:</label>
-                <input type="file" name="archivo" accept=".csv" required>
-                <input type="hidden" name="fecha_manual" value="{{ fecha }}">
+        <div class="control-card card-remote">
+            <label>📡 Conexión con PC:</label>
+            <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()">
+                📥 Solicitar Tiradas (Remoto)
+            </button>
+            
+            <div id="progresoContainer" class="progress-container">
+                <div class="progress-bar-bg">
+                    <div id="miBarra" class="progress-bar-fill"></div>
+                </div>
+                <div id="miTexto" class="status-text">Contactando agente...</div>
             </div>
-            <button type="submit">⬆️ Procesar</button>
+        </div>
+
+        <form action="/estacion/subir-tiradas" method="POST" enctype="multipart/form-data" class="control-card card-upload">
+            <label>📂 Subida Manual (CSV):</label>
+            <input type="file" name="archivo" accept=".csv" required>
+            <input type="hidden" name="fecha_manual" value="{{ fecha }}">
+            <button type="submit" class="btn-purple">⬆️ Procesar Archivo</button>
         </form>
+
     </div>
 
     {% if tiradas %}
@@ -112,9 +170,7 @@
                 <div class="vendedor-header" onclick="toggleAcordeon(this)">
                     <div class="vh-left">
                         <span class="arrow-icon">▶</span>
-                        <div>
-                            <div class="vh-name">{{ vendedor }}</div>
-                            </div>
+                        <div class="vh-name">{{ vendedor }}</div>
                     </div>
                     <div class="vh-right">
                         <div class="vh-total">$ {{ "{:,.2f}".format(total_plata) }}</div>
@@ -160,19 +216,20 @@
     </div>
 
     {% else %}
-        <div style="text-align:center; padding:50px; color:#999;">
+        <div style="text-align:center; padding:50px; color:#999; border: 2px dashed #ddd; border-radius: 12px;">
             <h2>📂 Sin datos de tiradas</h2>
             <p>No hay sobres cargados para el {{ fecha }}.</p>
+            <p>Usa el botón naranja para pedirlos a la PC o el violeta para subir un archivo.</p>
         </div>
     {% endif %}
 
     <script>
-        // Recargar al cambiar fecha
+        // 1. Recargar al cambiar fecha
         document.getElementById('fechaSelector').addEventListener('change', (e) => {
             if(e.target.value) window.location.href = `/estacion/tiradas?fecha=${e.target.value}`;
         });
 
-        // Acordeón (Misma lógica que Ventas)
+        // 2. Lógica Acordeón
         function toggleAcordeon(header) {
             header.classList.toggle('active');
             var content = header.nextElementSibling;
@@ -181,6 +238,62 @@
             } else {
                 content.style.maxHeight = content.scrollHeight + "px";
             }
+        }
+
+        // 3. LÓGICA DE SOLICITUD REMOTA (BOTÓN NARANJA)
+        function solicitarRemoto() {
+            const btn = document.getElementById('btnSolicitar');
+            const container = document.getElementById('progresoContainer');
+            const bar = document.getElementById('miBarra');
+            const txt = document.getElementById('miTexto');
+
+            if (btn.disabled) return;
+
+            // Estado inicial
+            btn.disabled = true;
+            btn.innerText = "⏳ Enviando orden...";
+            container.style.display = 'block';
+            bar.style.width = '10%';
+
+            // Llamada a la API
+            fetch('/api/lanzar-tiradas', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        txt.innerText = "Orden enviada. Esperando al agente...";
+                        
+                        // Simulación visual de progreso (ya que la respuesta real tarda unos segundos)
+                        let width = 10;
+                        const interval = setInterval(() => {
+                            if (width >= 90) {
+                                clearInterval(interval);
+                                txt.innerText = "Procesando archivos...";
+                                // Recargamos la página para ver los datos nuevos
+                                setTimeout(() => window.location.reload(), 2000);
+                            } else {
+                                width += 5; // Avanza poco a poco
+                                bar.style.width = width + '%';
+                            }
+                        }, 500); // Avanza cada medio segundo
+
+                    } else {
+                        alert("Error al enviar la orden.");
+                        resetUI();
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Error de conexión con el servidor.");
+                    resetUI();
+                });
+        }
+
+        function resetUI() {
+            const btn = document.getElementById('btnSolicitar');
+            const container = document.getElementById('progresoContainer');
+            btn.disabled = false;
+            btn.innerText = "📥 Solicitar Tiradas (Remoto)";
+            container.style.display = 'none';
         }
     </script>
 </body>
