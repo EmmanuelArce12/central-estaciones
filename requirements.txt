@@ -6,3 +6,4 @@ flask-login
 werkzeug
 flask-migrate
 python-dotenv
+pandas
