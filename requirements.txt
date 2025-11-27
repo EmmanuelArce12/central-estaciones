@@ -7,3 +7,4 @@ werkzeug
 flask-migrate
 python-dotenv
 pandas
+openpyxl
