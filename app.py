@@ -392,7 +392,21 @@ def reparar_horarios_db():
     db.session.commit()
     print(f"✅ FINALIZADO: {count} ok, {errores} errores.")
 # --- MÓDULO VENTAS POR VENDEDOR ---
-
+# --- ESTA ES LA PARTE QUE FALTA ---
+@app.route('/estacion/ventas-vendedor', methods=['GET'])
+@login_required
+def ver_ventas_vendedor():
+    # Mostrar datos de hoy por defecto o la fecha seleccionada
+    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    
+    ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
+    
+    # Calcular totales para mostrar abajo
+    total_litros = sum(v.litros for v in ventas)
+    total_plata = sum(v.monto for v in ventas)
+    
+    return render_template('ventas_vendedor.html', ventas=ventas, fecha=fecha, t_litros=total_litros, t_plata=total_plata, user=current_user)
+# ----------------------------------
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
