@@ -388,131 +388,103 @@ def reparar_horarios_db():
     print(f"✅ FINALIZADO: {count} ok, {errores} errores.")
 # --- MÓDULO VENTAS POR VENDEDOR ---
 
-@app.route('/estacion/ventas-vendedor', methods=['GET'])
-@login_required
-def ver_ventas_vendedor():
-    # Mostrar datos de hoy por defecto o la fecha seleccionada
-    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
-    
-    ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
-    
-    # Calcular totales para mostrar abajo
-    total_litros = sum(v.litros for v in ventas)
-    total_plata = sum(v.monto for v in ventas)
-    
-    return render_template('ventas_vendedor.html', ventas=ventas, fecha=fecha, t_litros=total_litros, t_plata=total_plata, user=current_user)
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
     if 'archivo' not in request.files:
         flash("No se subió ningún archivo")
         return redirect(url_for('ver_ventas_vendedor'))
-    
+
     archivo = request.files['archivo']
-    fecha_reporte = request.form.get('fecha')
-    
+    fecha_reporte = request.form.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Leer el archivo CRUDO completo
+        # 1. LEER EXCEL COMPLETO SIN CABECERAS
         df_raw = pd.read_excel(archivo, header=None)
-        
-        # 2. BUSCAR EL ANCLA "DETALLE:"
-        fila_detalle = -1
-        
-        # Escaneamos las primeras 50 filas
-        for r_idx, row in df_raw.head(50).iterrows():
-            # Convertimos la fila a texto y buscamos "detalle:" (ignorando mayúsculas)
-            if row.astype(str).str.contains('DETALLE:', case=False, na=False).any():
-                fila_detalle = r_idx
+
+        # 2. BUSCAR FILA DONDE ESTÉ LA TABLA REAL
+        fila_tabla = -1
+
+        for i, row in df_raw.iterrows():
+            fila_texto = row.astype(str).str.lower().str.strip()
+            if (
+                fila_texto.str.contains('vendedor').any()
+                and fila_texto.str.contains('producto').any()
+                and fila_texto.str.contains('vol').any()
+                and fila_texto.str.contains('importe').any()
+            ):
+                fila_tabla = i
                 break
-        
-        if fila_detalle == -1:
-            return "❌ Error: No encontré la celda 'DETALLE:' en el archivo para ubicarme."
 
-        # 3. IDENTIFICAR COLUMNAS BASADO EN LA ESTRUCTURA DEL EXCEL
-        # Según tu archivo:
-        # Fila DETALLE + 1 = Encabezados Principales ("Vendedor", "Combustibles")
-        fila_encabezados = df_raw.iloc[fila_detalle + 1]
-        
-        col_vendedor = -1
-        col_combustibles = -1
-        
-        for c_idx, val in enumerate(fila_encabezados):
-            val_str = str(val).strip().lower()
-            if 'vendedor' in val_str:
-                col_vendedor = c_idx
-            if 'combustibles' in val_str:
-                col_combustibles = c_idx
-                # En Excel, cuando hay celdas combinadas, el título queda en la primera columna.
-                # Por lo tanto, col_combustibles es "Cantidad" y col_combustibles + 1 es "Importe"
+        if fila_tabla == -1:
+            return "❌ No se pudo detectar la tabla real de ventas en el Excel."
 
-        if col_vendedor == -1 or col_combustibles == -1:
-            return f"❌ Error: Encontré 'DETALLE:' pero no las columnas 'Vendedor' o 'Combustibles' debajo."
+        # 3. CONSTRUIR DATAFRAME REAL
+        df = df_raw.iloc[fila_tabla + 1:].copy()
+        df.columns = df_raw.iloc[fila_tabla]
 
-        # Definimos las columnas de datos
-        col_cantidad = col_combustibles      # La columna donde empieza "Combustibles"
-        col_importe = col_combustibles + 1   # La columna siguiente
+        # 4. NORMALIZAR NOMBRES DE COLUMNAS
+        df.columns = df.columns.astype(str).str.strip().str.lower()
 
-        # 4. EXTRAER DATOS
-        # Los datos reales empiezan 3 filas después de DETALLE:
-        # (Fila Detalle) -> (Fila Vendedor) -> (Fila Subtítulos) -> DATOS
-        fila_inicio_datos = fila_detalle + 3
-        
-        df_datos = df_raw.iloc[fila_inicio_datos:].copy()
-        
-        # Seleccionamos las columnas detectadas
-        df_final = df_datos.iloc[:, [col_vendedor, col_cantidad, col_importe]]
-        df_final.columns = ['Vendedor', 'Cantidad', 'Importe']
+        col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
+        col_producto = [c for c in df.columns if 'producto' in c][0]
+        col_litros = [c for c in df.columns if 'vol' in c][0]
+        col_importe = [c for c in df.columns if 'importe' in c][0]
 
-        # 5. LIMPIEZA Y GUARDADO
-        df_final = df_final.dropna(subset=['Vendedor'])
-        
+        df = df[[col_vendedor, col_producto, col_litros, col_importe]]
+        df.columns = ['Vendedor', 'Producto', 'Litros', 'Importe']
+
+        # 5. LIMPIEZA
+        df = df.dropna(subset=['Vendedor'])
+
         def limpiar_numero(val):
             val = str(val).strip()
-            if val in ['', '-', 'nan', 'None']: return 0.0
-            # Formato Argentino: 1.234,56 -> Python: 1234.56
+            if val in ['', '-', 'nan', 'None']:
+                return 0.0
             val = val.replace('.', '').replace(',', '.')
             try:
                 return float(val)
             except:
                 return 0.0
 
-        df_final['Cantidad'] = df_final['Cantidad'].apply(limpiar_numero)
-        df_final['Importe'] = df_final['Importe'].apply(limpiar_numero)
+        df['Litros'] = df['Litros'].apply(limpiar_numero)
+        df['Importe'] = df['Importe'].apply(limpiar_numero)
 
-        # Agrupar por vendedor (por si aparecen repetidos)
-        resumen = df_final.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
+        # 6. AGRUPAR POR VENDEDOR + PRODUCTO
+        resumen = df.groupby(['Vendedor', 'Producto'])[['Litros', 'Importe']].sum().reset_index()
 
-        # Guardar en Base de Datos
-        VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
-        
-        for index, row in resumen.iterrows():
-            nombre = str(row['Vendedor']).strip()
-            # Ignoramos filas de totales del propio excel
-            if nombre and nombre.lower() not in ['total', 'totales', 'nan', 'none'] and not nombre.startswith('='):
-                nueva_venta = VentaVendedor(
-                    user_id=current_user.id,
-                    fecha=fecha_reporte,
-                    vendedor=nombre,
-                    litros=round(row['Cantidad'], 2),
-                    monto=round(row['Importe'], 2)
-                )
-                db.session.add(nueva_venta)
-        
+        # 7. BORRAR DATOS DEL DÍA Y REINSERTAR
+        VentaVendedor.query.filter_by(
+            user_id=current_user.id,
+            fecha=fecha_reporte
+        ).delete()
+
+        for _, row in resumen.iterrows():
+            nueva_venta = VentaVendedor(
+                user_id=current_user.id,
+                fecha=fecha_reporte,
+                vendedor=f"{row['Vendedor']} - {row['Producto']}",
+                litros=round(row['Litros'], 2),
+                monto=round(row['Importe'], 2)
+            )
+            db.session.add(nueva_venta)
+
         db.session.commit()
+
         return redirect(url_for('ver_ventas_vendedor', fecha=fecha_reporte))
 
     except Exception as e:
-        print(f"Error técnico: {e}")
+        print("Error técnico:", e)
         return f"""
         <div style="text-align:center; padding:50px; font-family:sans-serif;">
             <h1 style="color:red">Error Procesando Excel</h1>
-            <p>Detalle del error:</p>
-            <code style="background:#eee; padding:10px; display:block;">{str(e)}</code>
+            <pre>{str(e)}</pre>
             <br><a href='/estacion/ventas-vendedor'>Volver</a>
         </div>
         """
+
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
