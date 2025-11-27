@@ -415,54 +415,56 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Leer todo el Excel sin encabezados (Matriz cruda)
+        # 1. Leer el archivo CRUDO (sin encabezados)
         df_raw = pd.read_excel(archivo, header=None)
         
-        # 2. Encontrar coordenadas clave
-        fila_encabezado = -1
-        col_vendedor = -1
-        col_importe = -1
-        col_cantidad = -1
+        # --- FASE 1: ENCONTRAR LAS COORDENADAS DEL ENCABEZADO ---
+        fila_ancla_importe = -1
+        col_idx_importe = -1
+        col_idx_vendedor = -1
 
-        # Buscamos en las primeras 20 filas
-        for r_idx, row in df_raw.head(20).iterrows():
-            row_str = row.astype(str).str.lower().values
-            
-            # Buscamos la fila que tenga "vendedor"
-            if any('vendedor' in celda for celda in row_str):
-                # Ahora buscamos las columnas exactas en ESTA fila
-                for c_idx, val in enumerate(row):
-                    val_str = str(val).strip()
-                    
-                    if 'Vendedor' in val_str:
-                        fila_encabezado = r_idx
-                        col_vendedor = c_idx
-                    
-                    # Buscamos el símbolo ($) que vimos en tu foto
-                    if '($)' in val_str:
-                        col_importe = c_idx
-                        # LÓGICA CLAVE: La cantidad siempre está JUSTO A LA IZQUIERDA del importe ($)
-                        col_cantidad = c_idx - 1 
+        # Escaneamos las primeras 30 filas buscando nuestros puntos de referencia
+        # Usamos un bucle doble para encontrar la coordenada exacta (fila, columna)
+        for r_idx, row in df_raw.head(30).iterrows():
+            for c_idx, val in enumerate(row):
+                val_str = str(val).strip().lower()
                 
-                if fila_encabezado != -1: break # Ya encontramos todo
+                # Buscamos la columna Vendedor (puede estar en filas superiores debido a celdas combinadas)
+                if 'Vendedor' in val_str and col_idx_vendedor == -1:
+                    col_idx_vendedor = c_idx
+                
+                # Buscamos el ancla principal: el símbolo ($)
+                if 'Importe ($)' in val_str:
+                    fila_ancla_importe = r_idx
+                    col_idx_importe = c_idx
+            
+            # Si ya encontramos el ancla más baja ($), podemos dejar de buscar filas
+            if fila_ancla_importe != -1 and col_idx_vendedor != -1:
+                break
 
         # Validaciones de seguridad
-        if fila_encabezado == -1:
-            return "❌ Error: No encontré la celda 'Vendedor'."
-        if col_importe == -1:
-            return "❌ Error: No encontré la columna '($)'."
+        if fila_ancla_importe == -1:
+            return "❌ Error: No encontré el símbolo '($)' en el encabezado para guiarme."
+        if col_idx_vendedor == -1:
+            return "❌ Error: No encontré la columna 'Vendedor'."
+            
+        # Deducción lógica: La cantidad está justo a la izquierda del importe
+        col_idx_cantidad = col_idx_importe - 1
+
+        # --- FASE 2: RECORTE QUIRÚRGICO ---
+        # Los datos reales empiezan en la fila siguiente al ancla ($)
+        fila_inicio_datos = fila_ancla_importe + 1
         
-        # 3. Extraer y limpiar datos
-        # Cortamos desde la fila siguiente al encabezado
-        df_datos = df_raw.iloc[fila_encabezado + 1:].copy()
+        # Recortamos el DataFrame: desde la fila de datos hasta el final
+        df_datos = df_raw.iloc[fila_inicio_datos:].copy()
         
-        # Seleccionamos las 3 columnas mágicas usando sus índices numéricos
-        df_final = df_datos.iloc[:, [col_vendedor, col_cantidad, col_importe]]
+        # Seleccionamos SOLO las 3 columnas que nos interesan usando sus índices numéricos
+        df_final = df_datos.iloc[:, [col_idx_vendedor, col_idx_cantidad, col_idx_importe]]
         
-        # Renombramos para trabajar cómodo
+        # Renombramos las columnas para trabajar cómodamente
         df_final.columns = ['Vendedor', 'Cantidad', 'Importe']
 
-        # 4. Limpieza de valores (Vacíos y Formatos Numéricos)
+        # --- FASE 3: LIMPIEZA Y PROCESAMIENTO (Igual que antes) ---
         df_final = df_final.dropna(subset=['Vendedor'])
         
         def limpiar_numero(val):
@@ -478,16 +480,16 @@ def subir_ventas_vendedor():
         df_final['Cantidad'] = df_final['Cantidad'].apply(limpiar_numero)
         df_final['Importe'] = df_final['Importe'].apply(limpiar_numero)
 
-        # 5. Agrupar y Sumar por Vendedor
+        # Agrupar y Sumar por Vendedor
         resumen = df_final.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
 
-        # 6. Guardar en Base de Datos
+        # Guardar en Base de Datos
         VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
         
         for index, row in resumen.iterrows():
             nombre = str(row['Vendedor']).strip()
-            # Filtramos filas basura (Totales, vacíos, etc)
-            if nombre and nombre.lower() not in ['total', 'totales', 'nan']:
+            # Filtramos filas basura que suelen quedar al final (Totales del excel, etc)
+            if nombre and nombre.lower() not in ['total', 'totales', 'nan', 'none'] and not nombre.startswith('='):
                 nueva_venta = VentaVendedor(
                     user_id=current_user.id,
                     fecha=fecha_reporte,
@@ -505,9 +507,9 @@ def subir_ventas_vendedor():
         return f"""
         <div style="text-align:center; padding:50px; font-family:sans-serif;">
             <h1 style="color:red">Error Procesando Excel</h1>
-            <p>No se pudo interpretar el archivo.</p>
-            <code style="background:#eee; padding:10px; display:block;">{str(e)}</code>
-            <br><a href='/estacion/ventas-vendedor'>Volver</a>
+            <p>No se pudo interpretar el archivo. Detalles:</p>
+            <code style="background:#eee; padding:10px; display:block;white-space:pre-wrap;">{str(e)}</code>
+            <br><a href='/estacion/ventas-vendedor'>Volver a intentar</a>
         </div>
         """
 if __name__ == '__main__': 
