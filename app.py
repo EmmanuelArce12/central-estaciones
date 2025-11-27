@@ -401,7 +401,6 @@ def ver_ventas_vendedor():
     total_plata = sum(v.monto for v in ventas)
     
     return render_template('ventas_vendedor.html', ventas=ventas, fecha=fecha, t_litros=total_litros, t_plata=total_plata, user=current_user)
-
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
@@ -416,72 +415,83 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. ESTRATEGIA A PRUEBA DE FALLOS: Leer TODO el archivo una sola vez
-        # Lo leemos sin encabezados (header=None) para que no se pierda nada
+        # 1. Leer todo el Excel sin encabezados (Matriz cruda)
         df_raw = pd.read_excel(archivo, header=None)
         
-        # 2. Buscar en memoria en qué fila está la palabra "Vendedor"
-        fila_header = -1
-        
-        # Recorremos las primeras 20 filas buscando el título
-        for i, row in df_raw.head(20).iterrows():
-            fila_texto = row.astype(str).str.lower().values
-            if any('vendedor' in celda for celda in fila_texto):
-                fila_header = i
-                break
-        
-        if fila_header == -1:
-            return "❌ Error: No encontré la columna 'Vendedor' en el archivo. Revisa el formato."
+        # 2. Encontrar coordenadas clave
+        fila_encabezado = -1
+        col_vendedor = -1
+        col_importe = -1
+        col_cantidad = -1
 
-        # 3. Reconstruir la tabla usando esa fila como encabezado
-        # Asignamos la fila encontrada como nombres de columnas
-        df_raw.columns = df_raw.iloc[fila_header]
+        # Buscamos en las primeras 20 filas
+        for r_idx, row in df_raw.head(20).iterrows():
+            row_str = row.astype(str).str.lower().values
+            
+            # Buscamos la fila que tenga "vendedor"
+            if any('vendedor' in celda for celda in row_str):
+                # Ahora buscamos las columnas exactas en ESTA fila
+                for c_idx, val in enumerate(row):
+                    val_str = str(val).strip()
+                    
+                    if 'Vendedor' in val_str:
+                        fila_encabezado = r_idx
+                        col_vendedor = c_idx
+                    
+                    # Buscamos el símbolo ($) que vimos en tu foto
+                    if '($)' in val_str:
+                        col_importe = c_idx
+                        # LÓGICA CLAVE: La cantidad siempre está JUSTO A LA IZQUIERDA del importe ($)
+                        col_cantidad = c_idx - 1 
+                
+                if fila_encabezado != -1: break # Ya encontramos todo
+
+        # Validaciones de seguridad
+        if fila_encabezado == -1:
+            return "❌ Error: No encontré la celda 'Vendedor'."
+        if col_importe == -1:
+            return "❌ Error: No encontré la columna '($)'."
         
-        # Nos quedamos solo con los datos que están DEBAJO de esa fila
-        df = df_raw[fila_header+1:].copy()
-
-        # 4. Limpieza de nombres de columnas (quitar espacios extra)
-        # Esto convierte " Vendedor " en "Vendedor"
-        df.columns = df.columns.astype(str).str.strip()
-
-        # Verificar columnas críticas
-        cols_necesarias = ['Vendedor', 'Cantidad', 'Importe']
-        if not all(col in df.columns for col in cols_necesarias):
-            return f"❌ Error de Columnas: Busco {cols_necesarias} pero encontré: {list(df.columns)}"
-
-        # 5. Limpieza de datos (Filas vacías y formatos)
-        df = df.dropna(subset=['Vendedor'])
+        # 3. Extraer y limpiar datos
+        # Cortamos desde la fila siguiente al encabezado
+        df_datos = df_raw.iloc[fila_encabezado + 1:].copy()
         
-        # Función para limpiar números argentinos (1.000,00 -> 1000.00)
+        # Seleccionamos las 3 columnas mágicas usando sus índices numéricos
+        df_final = df_datos.iloc[:, [col_vendedor, col_cantidad, col_importe]]
+        
+        # Renombramos para trabajar cómodo
+        df_final.columns = ['Vendedor', 'Cantidad', 'Importe']
+
+        # 4. Limpieza de valores (Vacíos y Formatos Numéricos)
+        df_final = df_final.dropna(subset=['Vendedor'])
+        
         def limpiar_numero(val):
-            if isinstance(val, str):
-                val = str(val).strip()
-                # Si es un string vacío o guión, es 0
-                if val in ['', '-', 'nan']: return 0.0
-                # Quitamos puntos de mil y cambiamos coma por punto
-                val = val.replace('.', '').replace(',', '.')
+            val = str(val).strip()
+            if val in ['', '-', 'nan', 'None']: return 0.0
+            # Formato Argentino: 1.234,56 -> Python: 1234.56
+            val = val.replace('.', '').replace(',', '.')
             try:
                 return float(val)
             except:
                 return 0.0
 
-        df['Cantidad'] = df['Cantidad'].apply(limpiar_numero)
-        df['Importe'] = df['Importe'].apply(limpiar_numero)
+        df_final['Cantidad'] = df_final['Cantidad'].apply(limpiar_numero)
+        df_final['Importe'] = df_final['Importe'].apply(limpiar_numero)
 
-        # 6. Agrupar por Vendedor
-        resumen = df.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
+        # 5. Agrupar y Sumar por Vendedor
+        resumen = df_final.groupby('Vendedor')[['Cantidad', 'Importe']].sum().reset_index()
 
-        # 7. Guardar en Base de Datos (Borrar anterior y guardar nuevo)
+        # 6. Guardar en Base de Datos
         VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
         
         for index, row in resumen.iterrows():
-            # Ignoramos filas que sean totales del propio excel o basura
-            vendedor_nombre = str(row['Vendedor']).strip()
-            if vendedor_nombre.lower() not in ['total', 'totales', 'nan']:
+            nombre = str(row['Vendedor']).strip()
+            # Filtramos filas basura (Totales, vacíos, etc)
+            if nombre and nombre.lower() not in ['total', 'totales', 'nan']:
                 nueva_venta = VentaVendedor(
                     user_id=current_user.id,
                     fecha=fecha_reporte,
-                    vendedor=vendedor_nombre,
+                    vendedor=nombre,
                     litros=round(row['Cantidad'], 2),
                     monto=round(row['Importe'], 2)
                 )
@@ -491,17 +501,13 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor', fecha=fecha_reporte))
 
     except Exception as e:
-        print(f"Error procesando excel: {e}")
-        # Mostramos el error en pantalla para facilitar el diagnóstico
+        print(f"Error técnico: {e}")
         return f"""
         <div style="text-align:center; padding:50px; font-family:sans-serif;">
-            <h1 style="color:red">💥 Error al procesar</h1>
-            <p>Ocurrió un error leyendo el archivo Excel.</p>
-            <p style="background:#eee; padding:10px; border-radius:5px; display:inline-block">
-                {str(e)}
-            </p>
-            <br><br>
-            <a href='/estacion/ventas-vendedor'>⬅️ Volver a intentar</a>
+            <h1 style="color:red">Error Procesando Excel</h1>
+            <p>No se pudo interpretar el archivo.</p>
+            <code style="background:#eee; padding:10px; display:block;">{str(e)}</code>
+            <br><a href='/estacion/ventas-vendedor'>Volver</a>
         </div>
         """
 if __name__ == '__main__': 
