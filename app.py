@@ -414,19 +414,28 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
     
     archivo = request.files['archivo']
-    fecha_reporte = request.form.get('fecha')
+    # Si no elige fecha, usamos HOY
+    fecha_reporte = request.form.get('fecha') or datetime.now().strftime('%Y-%m-%d')
     
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Leer Excel sin encabezados
+        # 1. VERIFICAR SI YA EXISTE (Para avisar)
+        datos_existentes = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).first()
+        if datos_existentes:
+            flash(f"⚠️ Atención: Ya existían datos del {fecha_reporte}. Se han actualizado con el nuevo archivo.", "warning")
+        else:
+            flash(f"✅ Datos cargados correctamente para el {fecha_reporte}.", "success")
+
+        # 2. Leer Excel sin encabezados
         df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. Buscar fila de cabecera (Tu lógica)
+        # 3. Buscar fila de cabecera (Tu lógica robusta)
         fila_tabla = -1
         for i, row in df_raw.iterrows():
             fila_texto = row.astype(str).str.lower().str.strip()
+            # Buscamos palabras clave para asegurar que es la fila correcta
             if (fila_texto.str.contains('vendedor').any() and 
                 fila_texto.str.contains('producto').any() and 
                 fila_texto.str.contains('vol').any() and 
@@ -435,44 +444,57 @@ def subir_ventas_vendedor():
                 break
 
         if fila_tabla == -1:
-            return "❌ No se pudo detectar la tabla real de ventas."
+            flash("❌ Error: No se detectó la tabla de ventas en el Excel.", "error")
+            return redirect(url_for('ver_ventas_vendedor'))
 
-        # 3. Construir DataFrame
+        # 4. Construir DataFrame
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
         df.columns = df.columns.astype(str).str.strip().str.lower()
 
-        # 4. Mapeo dinámico de columnas
-        col_fecha = [c for c in df.columns if 'fecha' in c][0]
-        col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
-        col_producto = [c for c in df.columns if 'producto' in c][0]
-        col_litros = [c for c in df.columns if 'vol' in c][0]
-        col_importe = [c for c in df.columns if 'importe' in c][0]
-        # Usamos next con default por si alguna columna opcional falta
-        col_precio = next((c for c in df.columns if 'precio' in c), None)
-        col_duracion = next((c for c in df.columns if 'duración' in c or 'duracion' in c), None)
-        col_pago = next((c for c in df.columns if 'tipo' in c), None)
+        # 5. Mapeo dinámico de columnas
+        try:
+            col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
+            col_producto = [c for c in df.columns if 'producto' in c][0]
+            col_litros = [c for c in df.columns if 'vol' in c][0]
+            col_importe = [c for c in df.columns if 'importe' in c][0]
+            col_fecha_hora = [c for c in df.columns if 'fecha' in c][0] # Buscamos columna fecha/hora
+            
+            # Opcionales
+            col_precio = next((c for c in df.columns if 'precio' in c), None)
+            col_pago = next((c for c in df.columns if 'tipo' in c), None)
+            col_duracion = next((c for c in df.columns if 'duración' in c or 'duracion' in c), None)
+        except IndexError:
+            flash("❌ El Excel no tiene las columnas necesarias (Vendedor, Producto, Volumen, Importe).", "error")
+            return redirect(url_for('ver_ventas_vendedor'))
 
         # Seleccionamos y renombramos
         cols_to_keep = {
-            col_fecha: "Fecha",
+            col_fecha_hora: "Fecha",
             col_vendedor: "Vendedor",
             col_producto: "Combustible",
             col_litros: "Litros",
             col_importe: "Importe"
         }
         if col_precio: cols_to_keep[col_precio] = "Precio"
-        if col_duracion: cols_to_keep[col_duracion] = "DuracionSeg"
         if col_pago: cols_to_keep[col_pago] = "TipoPago"
+        if col_duracion: cols_to_keep[col_duracion] = "DuracionSeg"
 
         df = df[list(cols_to_keep.keys())].rename(columns=cols_to_keep)
 
-        # 5. Limpieza
+        # 6. LIMPIEZA DE DATOS (Corrección de suma)
         df = df.dropna(subset=["Vendedor"])
 
         def limpiar_numero(val):
+            # Si ya es un número (float o int), lo devolvemos tal cual
+            if isinstance(val, (int, float)):
+                return float(val)
+            
+            # Si es texto, limpiamos formato argentino
             val = str(val).strip()
             if val in ["", "-", "nan", "none"]: return 0.0
+            
+            # Formato: 1.234,56 -> 1234.56
             val = val.replace(".", "").replace(",", ".")
             try: return float(val)
             except: return 0.0
@@ -481,32 +503,36 @@ def subir_ventas_vendedor():
             if col in df.columns:
                 df[col] = df[col].apply(limpiar_numero)
 
-        # 6. Agrupación (Tu lógica exacta)
-        # Convertir fecha a datetime para ordenar bien
-        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], errors='coerce')
+        # 7. AGRUPACIÓN (Esto suma los duplicados)
+        # Si tienes el mismo vendedor vendiendo el mismo producto varias veces, se SUMARÁN.
+        # Si quieres ver cada venta por separado, tendríamos que no agrupar, 
+        # pero para "Resumen" la agrupación es lo correcto.
+        
+        # Convertimos fecha para poder ordenar y sacar la primera
+        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
         
         agregaciones = {
-            "Fecha": "first",
-            "Litros": "sum",
-            "Importe": "sum"
+            "Fecha": "first", # Guardamos la hora de la primera venta del turno/agrupación
+            "Litros": "sum",  # Sumamos litros
+            "Importe": "sum", # Sumamos plata
         }
-        if "Precio" in df.columns: agregaciones["Precio"] = "first"
+        if "Precio" in df.columns: agregaciones["Precio"] = "mean" # Precio promedio (o first)
         if "TipoPago" in df.columns: agregaciones["TipoPago"] = "first"
-        if "DuracionSeg" in df.columns: agregaciones["DuracionSeg"] = "first"
+        if "DuracionSeg" in df.columns: agregaciones["DuracionSeg"] = "sum"
 
         resumen = df.sort_values("Fecha_DT").groupby(["Vendedor", "Combustible"]).agg(agregaciones).reset_index()
 
-        # 7. Guardar en Base de Datos
+        # 8. Guardar en Base de Datos
+        # Borramos lo viejo de ESTA fecha específica
         VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_reporte).delete()
 
         for _, row in resumen.iterrows():
-            # Formateamos la hora para que se vea bien (solo hora)
-            hora_str = str(row['Fecha'])
+            # Formateamos solo la hora
+            hora_str = "-"
             try:
-                if isinstance(row['Fecha'], pd.Timestamp):
-                    hora_str = row['Fecha'].strftime('%H:%M:%S')
-                elif ' ' in hora_str: 
-                    hora_str = hora_str.split(' ')[1] # Si viene "Fecha Hora" tomamos Hora
+                if pd.notnull(row['Fecha']):
+                    ts = pd.to_datetime(row['Fecha'])
+                    hora_str = ts.strftime('%H:%M:%S')
             except: pass
 
             nueva = VentaVendedor(
@@ -528,6 +554,6 @@ def subir_ventas_vendedor():
 
     except Exception as e:
         print("Error técnico:", e)
-        return f"<h1>Error Procesando Excel</h1><p>{e}</p><a href='/estacion/ventas-vendedor'>Volver</a>"
-if __name__ == '__main__': 
+        flash(f"❌ Error procesando el archivo: {str(e)}", "error")
+        return redirect(url_for('ver_ventas_vendedor'))if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
