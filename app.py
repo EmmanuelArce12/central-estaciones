@@ -77,7 +77,7 @@ class Reporte(db.Model):
     fecha_operativa = db.Column(db.String(20))
     turno = db.Column(db.String(20))
     hora_cierre = db.Column(db.DateTime)
-    hora_apertura = db.Column(db.DateTime) # <--- NUEVA COLUMNA
+    hora_apertura = db.Column(db.DateTime)
 
 # --- INICIALIZACIÓN ---
 with app.app_context():
@@ -90,38 +90,38 @@ with app.app_context():
 def load_user(uid): 
     return User.query.get(int(uid))
 
+# --- NUEVA LÓGICA DE PARSEO DE FECHAS REALES ---
 def procesar_datos_turno(s):
-    # Devuelve: fecha_str, turno, datetime_cierre, datetime_apertura
+    # Formato esperado: "2025-11 (2025/11/02 21:43:34 - 2025/11/03 00:01:19)"
     try:
-        p = s.split(' - '); cr = p[1].replace(')', '').strip()
-        dt_cierre = datetime.strptime(cr, "%Y/%m/%d %H:%M:%S")
+        # 1. Limpiamos y obtenemos el contenido entre paréntesis
+        contenido = s.split('(')[1].replace(')', '') # "2025/11/02 21:43:34 - 2025/11/03 00:01:19"
+        partes = contenido.split(' - ')
         
+        str_apertura = partes[0].strip()
+        str_cierre = partes[1].strip()
+        
+        # 2. Convertimos a objetos DateTime REALES
+        dt_apertura = datetime.strptime(str_apertura, "%Y/%m/%d %H:%M:%S")
+        dt_cierre = datetime.strptime(str_cierre, "%Y/%m/%d %H:%M:%S")
+        
+        # 3. Calcular Fecha Operativa y Turno (Basado en Cierre)
         h = dt_cierre.hour
         fecha_obj = dt_cierre.date()
         turno = "Noche"
         
-        # Lógica de Turnos
         if 6 <= h < 14: 
             turno = "Mañana"
-            # Apertura Mañana: Ese mismo día a las 06:00
-            dt_apertura = datetime.combine(fecha_obj, time(6, 0, 0))
-            
         elif 14 <= h < 22: 
             turno = "Tarde"
-            # Apertura Tarde: Ese mismo día a las 14:00
-            dt_apertura = datetime.combine(fecha_obj, time(14, 0, 0))
-            
         else:
-            # Turno Noche (22:00 a 06:00)
-            # Si es madrugada (ej: 00:01), pertenece a la fecha operativa de ayer
+            # Si es madrugada (ej: 03:00 AM), pertenece al turno noche de AYER
             if h < 6: 
                 fecha_obj = fecha_obj - timedelta(days=1)
-            
-            # Apertura Noche: Fecha operativa a las 22:00
-            dt_apertura = datetime.combine(fecha_obj, time(22, 0, 0))
-
+        
         return fecha_obj.strftime("%Y-%m-%d"), turno, dt_cierre, dt_apertura
-    except: 
+    except Exception as e: 
+        print(f"Error parseando fecha: {s} -> {e}")
         return None, None, None, None
 
 # --- VISTAS ---
@@ -204,7 +204,6 @@ def config_vox():
     msg = ""
     cred = CredencialVox.query.filter_by(user_id=current_user.id).first()
     
-    # Semáforo online
     is_online = False; last_seen = "Nunca"
     if current_user.last_check:
         diff = datetime.now() - current_user.last_check
@@ -263,7 +262,6 @@ def agent_sync():
         conf = {"ip": user.credenciales_vox.vox_ip, "u": user.credenciales_vox.vox_usuario, "p": user.credenciales_vox.vox_clave}
     return jsonify({"status": "ok", "command": cmd, "config": conf}), 200
 
-# --- MODIFICADO: CALCULA APERTURA Y CIERRE ---
 @app.route('/api/reportar', methods=['POST'])
 def rep():
     try:
@@ -274,11 +272,10 @@ def rep():
         n = request.json
         nid = n.get('id_interno')
         
-        # Si ya existe, ignoramos
         if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
-        # Calculamos Apertura y Cierre
+        # Parseo con la nueva lógica (Extraer de texto real)
         f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
         
         if not f_op: return jsonify({"status":"error_fecha"}), 400
@@ -292,7 +289,7 @@ def rep():
             fecha_operativa=f_op, 
             turno=turno, 
             hora_cierre=dt_cierre,
-            hora_apertura=dt_apertura # <--- Guardamos la apertura calculada
+            hora_apertura=dt_apertura # Guardamos la hora REAL que vino del string
         )
         db.session.add(r)
         db.session.commit()
@@ -314,42 +311,45 @@ def lanzar():
     current_user.comando_pendiente = 'EXTRACT'; db.session.commit()
     return jsonify({"status": "ok"})
 
-# --- MODIFICADO: DEVUELVE APERTURA Y CIERRE AL FRONTEND ---
+# --- LÓGICA DE UNIFICACIÓN DE HORARIOS ---
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
     
-    salida = []
-    # Agrupamos por si hubiera múltiples cierres en un mismo turno (raro, pero posible)
-    # Mostramos la apertura del primero y cierre del último.
     agrupado = {}
     
     for r in reps:
         if r.turno not in agrupado:
             agrupado[r.turno] = {
                 "monto": 0.0, 
-                "apertura": r.hora_apertura, # Apertura teórica
-                "cierre": r.hora_cierre,     # Cierre real
+                "apertura": r.hora_apertura, 
+                "cierre": r.hora_cierre, 
                 "count": 0
             }
         
         agrupado[r.turno]["monto"] += r.monto
         agrupado[r.turno]["count"] += 1
-        # Si hubiera más de uno, nos quedamos con el cierre más tardío
+        
+        # LÓGICA CLAVE: Buscar extremos
+        # 1. Buscamos la apertura más TEMPRANA de todas las sesiones de este turno
+        if r.hora_apertura < agrupado[r.turno]["apertura"]:
+            agrupado[r.turno]["apertura"] = r.hora_apertura
+            
+        # 2. Buscamos el cierre más TARDÍO de todas las sesiones
         if r.hora_cierre > agrupado[r.turno]["cierre"]:
             agrupado[r.turno]["cierre"] = r.hora_cierre
 
+    salida = []
     for turno, datos in agrupado.items():
-        # Formateamos bonito
-        ini = datos["apertura"].strftime("%H:%M") if datos["apertura"] else "??"
-        fin = datos["cierre"].strftime("%H:%M") if datos["cierre"] else "??"
+        ini = datos["apertura"].strftime("%H:%M:%S") if datos["apertura"] else "??"
+        fin = datos["cierre"].strftime("%H:%M:%S") if datos["cierre"] else "??"
         
         salida.append({
             "turno": turno,
             "monto": datos["monto"],
             "cantidad_cierres": datos["count"],
-            "horario_real": f"{ini} a {fin}" # <--- ESTO ES LO QUE VERÁS EN EL HTML
+            "horario_real": f"{ini} a {fin}" 
         })
         
     return jsonify(salida)
