@@ -572,62 +572,116 @@ def subir_tiradas():
 # 1. API DE RECEPCIÓN (Usa token_tiradas)
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
+    # 1. Validar Token
     token = request.headers.get('X-API-TOKEN')
-    user = User.query.filter_by(token_tiradas=token).first() # BUSCAR POR TOKEN TIRADAS
+    user = User.query.filter_by(token_tiradas=token).first()
     
-    if not user: return jsonify({"status": "error", "msg": "Token invalido"}), 401
-    if 'archivo' not in request.files: return jsonify({"status": "error", "msg": "Sin archivo"}), 400
+    if not user:
+        print(f"❌ RECHAZADO: Token desconocido: {token}")
+        return jsonify({"status": "error", "msg": "Token invalido"}), 401
+
+    print(f"✅ CONECTADO: Usuario {user.username} (ID: {user.id}) subiendo tiradas...")
+
+    # 2. Validar Archivo
+    if 'archivo' not in request.files:
+        print("❌ ERROR: No llegó ningún archivo")
+        return jsonify({"status": "error", "msg": "Sin archivo"}), 400
     
     archivo = request.files['archivo']
+    
     try:
+        # 3. Leer CSV
         try:
             df = pd.read_csv(archivo)
             if len(df.columns) < 2: df = pd.read_csv(archivo, sep=';')
-        except: return jsonify({"status": "error", "msg": "Formato CSV invalido"}), 400
+            print(f"📄 CSV Leído. Filas: {len(df)}")
+        except Exception as e:
+            print(f"❌ ERROR LECTURA CSV: {e}")
+            return jsonify({"status": "error", "msg": "Formato CSV invalido"}), 400
 
+        # 4. Normalizar Columnas
         df.columns = df.columns.astype(str).str.lower().str.strip()
         
-        # Mapeo flexible de columnas
+        # Buscar columnas clave
         col_monto = next((c for c in df.columns if 'monto' in c or 'importe' in c), None)
         col_vend = next((c for c in df.columns if 'vendedor' in c or 'nombre' in c), None)
+        
+        # Columnas opcionales
         col_hora = next((c for c in df.columns if 'hora' in c), None)
         col_turno = next((c for c in df.columns if 'turno' in c), None)
         col_sector = next((c for c in df.columns if 'sector' in c), None)
 
-        if not col_monto or not col_vend: return jsonify({"status": "error", "msg": "Faltan columnas Vendedor/Monto"}), 400
+        if not col_monto or not col_vend:
+            print(f"❌ ERROR COLUMNAS. Encontradas: {df.columns}")
+            return jsonify({"status": "error", "msg": "Faltan columnas Vendedor/Monto"}), 400
 
+        # 5. Preparar Datos
         fecha_hoy = datetime.now().strftime('%Y-%m-%d')
         
-        # Buscar coincidencias de nombre
+        # Similitud de Nombres
         ventas_existentes = VentaVendedor.query.filter_by(user_id=user.id, fecha=fecha_hoy).all()
         nombres_oficiales = list(set([v.vendedor for v in ventas_existentes]))
 
-        Tirada.query.filter_by(user_id=user.id, fecha_operativa=fecha_hoy).delete()
+        # Borrar anteriores del día
+        try:
+            borrados = Tirada.query.filter_by(user_id=user.id, fecha_operativa=fecha_hoy).delete()
+            db.session.commit() # Commit intermedio para asegurar borrado
+            print(f"🧹 Borradas {borrados} tiradas anteriores de hoy.")
+        except Exception as e:
+            db.session.rollback()
+            print(f"⚠️ Error borrando anteriores: {e}")
 
+        # 6. Insertar Nuevas
         count = 0
-        for _, row in df.iterrows():
-            nombre_csv = str(row[col_vend]).strip()
-            nombre_final = nombre_csv
-            if nombres_oficiales:
-                matches = difflib.get_close_matches(nombre_csv, nombres_oficiales, n=1, cutoff=0.4)
-                if matches: nombre_final = matches[0]
+        import difflib # Asegurar import aquí por si acaso
 
-            try: val = float(str(row[col_monto]).replace('$','').replace('.','').replace(',','.'))
-            except: val = 0.0
+        for index, row in df.iterrows():
+            try:
+                nombre_csv = str(row[col_vend]).strip()
+                nombre_final = nombre_csv
+                if nombres_oficiales:
+                    matches = difflib.get_close_matches(nombre_csv, nombres_oficiales, n=1, cutoff=0.4)
+                    if matches: nombre_final = matches[0]
 
-            db.session.add(Tirada(
-                user_id=user.id, fecha_operativa=fecha_hoy, vendedor=nombre_final, vendedor_raw=nombre_csv,
-                monto=val, hora=str(row[col_hora]) if col_hora else "-",
-                turno=str(row[col_turno]) if col_turno else "-", sector=str(row[col_sector]) if col_sector else "-"
-            ))
-            count += 1
-        
+                # Limpieza de monto (Saca $, puntos de mil, deja coma decimal si hay)
+                val_str = str(row[col_monto]).replace('$','').replace(' ','')
+                # Si tiene punto y coma, asumir formato 1.000,00 -> 1000.00
+                if '.' in val_str and ',' in val_str:
+                    val_str = val_str.replace('.','').replace(',','.')
+                elif ',' in val_str:
+                    val_str = val_str.replace(',','.')
+                
+                try: val = float(val_str)
+                except: val = 0.0
+
+                # Crear Objeto Tirada
+                nueva_tirada = Tirada(
+                    user_id=user.id, # ID ENTERO DIRECTO
+                    fecha_operativa=fecha_hoy,
+                    vendedor=nombre_final,
+                    vendedor_raw=nombre_csv,
+                    monto=val,
+                    hora=str(row[col_hora]) if col_hora else "-",
+                    turno=str(row[col_turno]) if col_turno else "-",
+                    sector=str(row[col_sector]) if col_sector else "-",
+                    detalle_extra="Carga Automatica"
+                )
+                db.session.add(nueva_tirada)
+                count += 1
+            except Exception as row_e:
+                print(f"⚠️ Error en fila {index}: {row_e}")
+
+        # 7. Guardar Cambios
         user.comando_tiradas = None # Limpiar orden
         db.session.commit()
+        
+        print(f"💾 ÉXITO: Guardadas {count} tiradas para {user.username}")
         return jsonify({"status": "ok", "count": count}), 200
 
-    except Exception as e: return jsonify({"status": "error", "msg": str(e)}), 500
-
+    except Exception as e:
+        db.session.rollback()
+        print(f"🔥 ERROR FATAL: {str(e)}")
+        return jsonify({"status": "error", "msg": str(e)}), 500
 # 2. LANZAR ORDEN (Boton Naranja)
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
