@@ -572,117 +572,127 @@ def subir_tiradas():
 # 1. API DE RECEPCIÓN (Usa token_tiradas)
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
-    # 1. Validar Token
+    print("🔵 [API] Recibiendo archivo de tirada...")
+    
     token = request.headers.get('X-API-TOKEN')
     user = User.query.filter_by(token_tiradas=token).first()
     
-    if not user:
-        print(f"❌ RECHAZADO: Token desconocido: {token}")
+    if not user: 
+        print(f"❌ Token rechazado: {token}")
         return jsonify({"status": "error", "msg": "Token invalido"}), 401
 
-    print(f"✅ CONECTADO: Usuario {user.username} (ID: {user.id}) subiendo tiradas...")
-
-    # 2. Validar Archivo
-    if 'archivo' not in request.files:
-        print("❌ ERROR: No llegó ningún archivo")
-        return jsonify({"status": "error", "msg": "Sin archivo"}), 400
-    
+    if 'archivo' not in request.files: return jsonify({"status": "error", "msg": "Sin archivo"}), 400
     archivo = request.files['archivo']
     
     try:
-        # 3. Leer CSV
-        try:
-            df = pd.read_csv(archivo)
-            if len(df.columns) < 2: df = pd.read_csv(archivo, sep=';')
-            print(f"📄 CSV Leído. Filas: {len(df)}")
-        except Exception as e:
-            print(f"❌ ERROR LECTURA CSV: {e}")
-            return jsonify({"status": "error", "msg": "Formato CSV invalido"}), 400
+        # 1. LECTURA FLEXIBLE DEL CSV
+        import io
+        contenido = archivo.read()
+        df = None
+        
+        # Probamos separadores comunes (Tu archivo parece usar tabulaciones o espacios múltiples)
+        for sep in [',', ';', '\t', '\s+']:
+            try:
+                stream = io.BytesIO(contenido)
+                # engine='python' ayuda con separadores complejos
+                df_temp = pd.read_csv(stream, sep=sep, engine='python') if sep == '\s+' else pd.read_csv(stream, sep=sep)
+                
+                # Verificamos si encontró columnas clave
+                cols = [c.lower().strip() for c in df_temp.columns]
+                if 'nombre' in cols and ('total bolsa' in cols or 'total dep.' in cols):
+                    df = df_temp
+                    print(f"✅ Separador detectado: '{sep}'")
+                    break
+            except: continue
+            
+        if df is None:
+            # Último intento: lectura default
+            stream = io.BytesIO(contenido)
+            df = pd.read_csv(stream)
 
-        # 4. Normalizar Columnas
-        df.columns = df.columns.astype(str).str.lower().str.strip()
+        # 2. LIMPIEZA DE NOMBRES DE COLUMNA (Quitar espacios extra)
+        df.columns = df.columns.astype(str).str.strip()
+        print(f"🔍 Columnas encontradas: {list(df.columns)}")
+
+        # 3. MAPEO EXACTO PARA TU ARCHIVO
+        # Buscamos la columna que contenga "Nombre" (para Vendedor)
+        col_vend = next((c for c in df.columns if 'Nombre' in c), None)
         
-        # Buscar columnas clave
-        col_monto = next((c for c in df.columns if 'monto' in c or 'importe' in c), None)
-        col_vend = next((c for c in df.columns if 'vendedor' in c or 'nombre' in c), None)
+        # Buscamos la columna que contenga "Total Bolsa" o "Total dep." (para Monto)
+        col_monto = next((c for c in df.columns if 'Total Bolsa' in c or 'Total dep.' in c), None)
         
-        # Columnas opcionales
-        col_hora = next((c for c in df.columns if 'hora' in c), None)
-        col_turno = next((c for c in df.columns if 'turno' in c), None)
-        col_sector = next((c for c in df.columns if 'sector' in c), None)
+        # Buscamos Fecha/Hora
+        col_fecha_hora = next((c for c in df.columns if 'Fecha' in c and 'Hora' in c), None)
+        
+        # Buscamos Sector (para turno)
+        col_sector = next((c for c in df.columns if 'Sector' in c), None)
 
         if not col_monto or not col_vend:
-            print(f"❌ ERROR COLUMNAS. Encontradas: {df.columns}")
-            return jsonify({"status": "error", "msg": "Faltan columnas Vendedor/Monto"}), 400
+            msg = f"No se encontraron columnas. Buscamos 'Nombre' y 'Total Bolsa'. Vimos: {list(df.columns)}"
+            print(f"❌ {msg}")
+            return jsonify({"status": "error", "msg": msg}), 400
 
-        # 5. Preparar Datos
+        # 4. PROCESAMIENTO
         fecha_hoy = datetime.now().strftime('%Y-%m-%d')
         
-        # Similitud de Nombres
+        # Preparamos comparación de nombres
         ventas_existentes = VentaVendedor.query.filter_by(user_id=user.id, fecha=fecha_hoy).all()
         nombres_oficiales = list(set([v.vendedor for v in ventas_existentes]))
 
-        # Borrar anteriores del día
-        try:
-            borrados = Tirada.query.filter_by(user_id=user.id, fecha_operativa=fecha_hoy).delete()
-            db.session.commit() # Commit intermedio para asegurar borrado
-            print(f"🧹 Borradas {borrados} tiradas anteriores de hoy.")
-        except Exception as e:
-            db.session.rollback()
-            print(f"⚠️ Error borrando anteriores: {e}")
-
-        # 6. Insertar Nuevas
         count = 0
-        import difflib # Asegurar import aquí por si acaso
+        import difflib
 
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             try:
+                # OBTENER DATOS
                 nombre_csv = str(row[col_vend]).strip()
+                
+                # Limpieza de Monto
+                val_str = str(row[col_monto]).replace('$','').replace(',','.') # 10000 -> 10000.0
+                try: val = float(val_str)
+                except: val = 0.0
+
+                # Obtener Hora desde la columna combinada "2022-09-21 04:43:21"
+                hora_str = "-"
+                if col_fecha_hora and pd.notnull(row[col_fecha_hora]):
+                    try:
+                        # Intentamos parsear la fecha completa y sacar la hora
+                        dt = pd.to_datetime(row[col_fecha_hora])
+                        hora_str = dt.strftime('%H:%M:%S')
+                        # Opcional: Usar la fecha del archivo en vez de 'hoy' si quisieras
+                        # fecha_hoy = dt.strftime('%Y-%m-%d') 
+                    except: pass
+
+                # Fuzzy Match de Nombre
                 nombre_final = nombre_csv
                 if nombres_oficiales:
                     matches = difflib.get_close_matches(nombre_csv, nombres_oficiales, n=1, cutoff=0.4)
                     if matches: nombre_final = matches[0]
 
-                # Limpieza de monto (Saca $, puntos de mil, deja coma decimal si hay)
-                val_str = str(row[col_monto]).replace('$','').replace(' ','')
-                # Si tiene punto y coma, asumir formato 1.000,00 -> 1000.00
-                if '.' in val_str and ',' in val_str:
-                    val_str = val_str.replace('.','').replace(',','.')
-                elif ',' in val_str:
-                    val_str = val_str.replace(',','.')
-                
-                try: val = float(val_str)
-                except: val = 0.0
-
-                # Crear Objeto Tirada
-                nueva_tirada = Tirada(
-                    user_id=user.id, # ID ENTERO DIRECTO
+                # Guardar en DB
+                db.session.add(Tirada(
+                    user_id=user.id,
                     fecha_operativa=fecha_hoy,
                     vendedor=nombre_final,
                     vendedor_raw=nombre_csv,
                     monto=val,
-                    hora=str(row[col_hora]) if col_hora else "-",
-                    turno=str(row[col_turno]) if col_turno else "-",
-                    sector=str(row[col_sector]) if col_sector else "-",
-                    detalle_extra="Carga Automatica"
-                )
-                db.session.add(nueva_tirada)
+                    hora=hora_str,
+                    turno=str(row[col_sector]) if col_sector else "-", # Guardamos "Playa Turno Noche" aquí
+                    sector="-", 
+                    detalle_extra="Importado Autom."
+                ))
                 count += 1
-            except Exception as row_e:
-                print(f"⚠️ Error en fila {index}: {row_e}")
+            except Exception as e:
+                print(f"⚠️ Error fila: {e}")
 
-        # 7. Guardar Cambios
-        user.comando_tiradas = None # Limpiar orden
+        user.comando_tiradas = None 
         db.session.commit()
-        
-        print(f"💾 ÉXITO: Guardadas {count} tiradas para {user.username}")
+        print(f"💾 Guardadas {count} tiradas.")
         return jsonify({"status": "ok", "count": count}), 200
 
     except Exception as e:
-        db.session.rollback()
-        print(f"🔥 ERROR FATAL: {str(e)}")
-        return jsonify({"status": "error", "msg": str(e)}), 500
-# 2. LANZAR ORDEN (Boton Naranja)
+        print(f"🔥 Error Servidor: {e}")
+        return jsonify({"status": "error", "msg": str(e)}), 500# 2. LANZAR ORDEN (Boton Naranja)
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_orden_tiradas():
