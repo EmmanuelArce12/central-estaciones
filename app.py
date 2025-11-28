@@ -340,32 +340,39 @@ def lanzar_orden_tiradas():
     return jsonify({"status": "ok"})
 
 # 2. API RECEPCIÓN: El agente envía el archivo aquí
+# --- EN APP.PY ---
+
+# 1. API DE RECEPCIÓN (Aquí ocurre la ASOCIACIÓN DEL ID)
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
-    # Validar Token
+    # A. Recibimos el Token del Agente
     token = request.headers.get('X-API-TOKEN')
+    
+    # B. BUSCAMOS AL DUEÑO DEL TOKEN (Aquí se hace la asociación)
     user = User.query.filter_by(api_token=token).first()
-    if not user: return jsonify({"status": "error", "msg": "Token invalido"}), 401
+    
+    if not user: 
+        return jsonify({"status": "error", "msg": "Token invalido"}), 401
 
     if 'archivo' not in request.files:
         return jsonify({"status": "error", "msg": "Sin archivo"}), 400
 
     archivo = request.files['archivo']
     try:
-        # Reutilizamos la lógica de Pandas (Importar difflib si no está arriba)
-        import difflib 
+        import difflib # Importamos aquí o arriba
         
-        # Leemos el CSV
+        # Leer CSV
         try:
             df = pd.read_csv(archivo)
             if len(df.columns) < 2: df = pd.read_csv(archivo, sep=';')
         except:
             return jsonify({"status": "error", "msg": "Formato CSV invalido"}), 400
 
-        # Normalización columnas
+        # Normalizar columnas
         df.columns = df.columns.astype(str).str.lower().str.strip()
         col_monto = next((c for c in df.columns if 'monto' in c or 'importe' in c), None)
         col_vend = next((c for c in df.columns if 'vendedor' in c or 'playero' in c or 'nombre' in c), None)
+        # ... (resto de detección de columnas igual) ...
         col_hora = next((c for c in df.columns if 'hora' in c), None)
         col_turno = next((c for c in df.columns if 'turno' in c), None)
         col_sector = next((c for c in df.columns if 'sector' in c), None)
@@ -373,13 +380,12 @@ def api_recepcion_tiradas():
         if not col_monto or not col_vend:
             return jsonify({"status": "error", "msg": "Columnas faltantes"}), 400
 
-        # Lógica de Nombres (Fuzzy Match)
-        fecha_hoy = datetime.now().strftime('%Y-%m-%d') # Asume fecha de hoy al subir
+        # Lógica de Nombres
+        fecha_hoy = datetime.now().strftime('%Y-%m-%d')
         ventas_existentes = VentaVendedor.query.filter_by(user_id=user.id, fecha=fecha_hoy).all()
         nombres_oficiales = list(set([v.vendedor for v in ventas_existentes]))
 
-        # Limpiamos tiradas anteriores del día para evitar duplicados masivos
-        # (Opcional: podrías no borrar si los CSV son incrementales)
+        # Limpieza previa del día para evitar duplicados
         Tirada.query.filter_by(user_id=user.id, fecha_operativa=fecha_hoy).delete()
 
         count = 0
@@ -395,7 +401,7 @@ def api_recepcion_tiradas():
             except: monto_val = 0.0
 
             nueva = Tirada(
-                user_id=user.id,
+                user_id=user.id, # <--- ¡AQUÍ SE GUARDA LA ASOCIACIÓN! Usamos el ID del usuario encontrado por Token.
                 fecha_operativa=fecha_hoy,
                 vendedor=nombre_final,
                 vendedor_raw=nombre_csv,
@@ -412,7 +418,23 @@ def api_recepcion_tiradas():
 
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
-@app.route('/api/resumen-dia/<string:fecha>')
+
+# 2. API DE ESTADO (Para el Semáforo en el Frontend)
+@app.route('/api/estado-tiradas')
+@login_required
+def estado_tiradas():
+    is_online = False
+    # Si hubo señal hace menos de 60 segundos, está ONLINE
+    if current_user.last_check:
+        delta = datetime.now() - current_user.last_check
+        if delta.total_seconds() < 60:
+            is_online = True
+            
+    return jsonify({
+        "online": is_online,
+        "comando_pendiente": current_user.comando_pendiente == 'UPLOAD_TIRADAS',
+        "ultima_vez": current_user.last_check.strftime("%H:%M:%S") if current_user.last_check else "-"
+    })@app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
