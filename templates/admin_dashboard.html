@@ -18,15 +18,15 @@
         .alert-error { background-color: #f8d7da; color: #721c24; border-left-color: #dc3545; }
 
         /* GRID DE TARJETAS SUPERIORES */
-        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
         .card { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
         .card h3 { margin-top: 0; font-size: 1rem; display: flex; align-items: center; gap: 10px; }
         
         /* Colores de Tarjetas */
         .card-create { border-top: 4px solid #007bff; }
-        .card-vox { border-top: 4px solid #17a2b8; background-color: #fcfdfe; }
-        .card-tiradas { border-top: 4px solid #e67e22; background-color: #fffbf7; }
+        .card-link { border-top: 4px solid #6c757d; background-color: #f8f9fa; }
+        .card-add { border-top: 4px solid #28a745; }
 
         /* FORMULARIOS */
         .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
@@ -39,15 +39,14 @@
         .btn-primary { background-color: #007bff; color: white; width: 100%; }
         .btn-primary:hover { background-color: #0056b3; }
         
-        .btn-vox { background-color: #17a2b8; color: white; }
-        .btn-vox:hover { background-color: #138496; }
-        
-        .btn-tiradas { background-color: #e67e22; color: white; }
-        .btn-tiradas:hover { background-color: #d35400; }
+        .btn-success { background-color: #28a745; color: white; width: 100%; }
+        .btn-success:hover { background-color: #218838; }
 
-        .btn-trash { background-color: #ffebee; color: #c62828; padding: 6px 10px; }
-        .btn-trash:hover { background-color: #ffcdd2; }
-        .btn-unlink { background-color: #fff3e0; color: #ef6c00; padding: 6px 10px; }
+        .btn-link-action { background-color: #6c757d; color: white; }
+        .btn-link-action:hover { background-color: #5a6268; }
+        
+        .btn-trash-station { background-color: #fff; border: 1px solid #dc3545; color: #dc3545; padding: 5px 10px; border-radius: 4px; }
+        .btn-trash-station:hover { background-color: #dc3545; color: white; }
 
         /* TABLA PRINCIPAL */
         table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9rem; }
@@ -61,42 +60,21 @@
         .bg-offline { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .bg-waiting { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
 
-        /* TOKEN WRAPPER CON BOTONES */
+        /* TOKEN WRAPPER */
         .token-row { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+        .token-wrapper { display: flex; align-items: center; border: 1px solid #ced4da; border-radius: 4px; overflow: hidden; max-width: 180px; background: white; flex-grow: 1; }
+        .token-input { border: none; padding: 4px 8px; font-family: monospace; font-size: 0.8rem; color: #555; width: 100%; outline: none; background: transparent; }
+        .btn-copy-mini { background: #f1f3f5; color: #495057; border-left: 1px solid #ced4da; padding: 4px 8px; font-size: 0.8rem; cursor: pointer; }
         
-        .token-wrapper { 
-            display: flex; align-items: center; border: 1px solid #ced4da; 
-            border-radius: 4px; overflow: hidden; max-width: 180px; background: white; flex-grow: 1;
-        }
-        .token-input { 
-            border: none; padding: 4px 8px; font-family: monospace; font-size: 0.8rem; 
-            color: #555; width: 100%; outline: none; background: transparent;
-        }
-        .btn-copy-mini { 
-            background: #f1f3f5; color: #495057; border-left: 1px solid #ced4da; 
-            padding: 4px 8px; font-size: 0.8rem; cursor: pointer;
-        }
-        
-        /* BOTÓN BORRAR TOKEN INDIVIDUAL */
-        .btn-mini-del {
-            background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;
-            padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
-        }
+        .btn-mini-del { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
         .btn-mini-del:hover { background: #c62828; color: white; }
 
         .pairing-code { font-size: 1.1rem; font-weight: bold; letter-spacing: 1px; }
-        .txt-vox { color: #17a2b8; }
-        .txt-tiradas { color: #e67e22; }
-        
-        .channel-cell { min-width: 240px; }
         .channel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .last-seen { font-size: 0.75rem; color: #999; margin-left: auto; }
-
+        
         /* Loader */
         #loading-indicator { font-size: 0.8rem; color: #aaa; margin-left: 10px; opacity: 0; transition: opacity 0.3s; }
-        
-        .btn-trash-station { background-color: #fff; border: 1px solid #dc3545; color: #dc3545; padding: 5px 10px; border-radius: 4px; }
-        .btn-trash-station:hover { background-color: #dc3545; color: white; }
     </style>
 </head>
 <body>
@@ -132,39 +110,62 @@
                         <select name="role"><option value="estacion">Estación</option><option value="superadmin">Admin</option></select>
                     </div>
                 </div>
-                <button type="submit" class="btn-primary" style="width:100%">Crear</button>
+                <button type="submit" class="btn-primary">Crear</button>
             </form>
         </div>
 
-        <div class="card card-vox">
-            <h3 class="txt-vox"><i class="fa-solid fa-gas-pump"></i> Vincular VOX (PC 1)</h3>
-            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Conexión para lectura de surtidores.</p>
-            <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
-                <input type="hidden" name="link_pc" value="1">
-                <div style="flex:1">
-                    <label>Estación</label>
-                    <select name="user_id">
-                        {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
-                    </select>
+        <div class="card card-link">
+            <h3><i class="fa-solid fa-link"></i> Vincular Canal</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Ingresar código mostrado en el Agente (ej: ABC-12).</p>
+            <form method="POST">
+                <input type="hidden" name="link_channel" value="1">
+                <label>Canal a vincular</label>
+                <select name="channel_id">
+                    {% for u in users %}
+                        {% if u.role != 'superadmin' %}
+                            <optgroup label="{{ u.username }}">
+                                {% for ch in u.channels %}
+                                    {% if not ch.token %}
+                                        <option value="{{ ch.id }}">{{ ch.tipo }} - {{ ch.nombre }}</option>
+                                    {% endif %}
+                                {% endfor %}
+                            </optgroup>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+                <div class="form-row" style="margin-top:10px;">
+                    <div class="form-group" style="flex:2;">
+                        <input type="text" name="pairing_code" placeholder="CÓDIGO (ABC-12)" required>
+                    </div>
+                    <button type="submit" class="btn-link-action" style="flex:1;">Link</button>
                 </div>
-                <div style="width:90px"><label>Código</label><input type="text" name="pairing_code" placeholder="ABC-12"></div>
-                <button type="submit" class="btn-vox">Link</button>
             </form>
         </div>
 
-        <div class="card card-tiradas">
-            <h3 class="txt-tiradas"><i class="fa-solid fa-envelope-open-text"></i> Vincular Tiradas (PC 2)</h3>
-            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Conexión para subida de sobres/caja.</p>
-            <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
-                <input type="hidden" name="link_tiradas" value="1">
-                <div style="flex:1">
-                    <label>Estación</label>
-                    <select name="user_id">
-                        {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
-                    </select>
+        <div class="card card-add">
+            <h3><i class="fa-solid fa-plus-circle"></i> Agregar Canal Extra</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Crear un canal adicional manualmente.</p>
+            <form method="POST">
+                <input type="hidden" name="add_channel" value="1">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Estación</label>
+                        <select name="user_id">
+                            {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select name="tipo">
+                            <option value="VOX">VOX (Surtidores)</option>
+                            <option value="TIRADAS">TIRADAS (Sobres)</option>
+                        </select>
+                    </div>
                 </div>
-                <div style="width:90px"><label>Código</label><input type="text" name="pairing_code" placeholder="XYZ-99"></div>
-                <button type="submit" class="btn-tiradas">Link</button>
+                <div class="form-row">
+                    <div class="form-group"><label>Nombre (Ej: Caja 2)</label><input type="text" name="nombre" required></div>
+                </div>
+                <button type="submit" class="btn-success">Agregar</button>
             </form>
         </div>
 
@@ -183,6 +184,7 @@
         </thead>
         <tbody id="table-body">
             {% for u in users %}
+            {% if u.role != 'superadmin' %}
             <tr id="row-{{ u.id }}">
                 <td>{{ u.id }}</td>
                 <td>
@@ -190,94 +192,97 @@
                     <span style="color:#777;">{{ u.cliente_info.nombre_fantasia }}</span>
                 </td>
                 
-                <td class="channel-cell" id="vox-cell-{{ u.id }}">
-                    <div class="channel-header">
-                        {% if u.status_conexion == 'online' %}<span class="badge bg-online">ONLINE</span>
-                        {% elif u.status_conexion == 'waiting' %}<span class="badge bg-waiting">WAITING</span>
-                        {% else %}<span class="badge bg-offline">OFFLINE</span>{% endif %}
-                        <span class="last-seen">{{ u.last_check.strftime('%H:%M') if u.last_check else '-' }}</span>
-                    </div>
-                    
-                    {% if u.api_token %}
-                        <div class="token-row">
-                            <div class="token-wrapper" style="border-left: 3px solid #17a2b8;">
-                                <input type="text" class="token-input" id="vox-input-{{ u.id }}" value="{{ u.api_token }}" readonly onclick="this.select()">
-                                <button class="btn-copy-mini" onclick="copiarInput('vox-input-{{ u.id }}')"><i class="fa-regular fa-copy"></i></button>
-                            </div>
-                            <form method="POST" onsubmit="return confirm('¿Desvincular solo VOX?');">
-                                <input type="hidden" name="user_id" value="{{ u.id }}">
-                                <input type="hidden" name="revoke_vox" value="1">
-                                <button type="submit" class="btn-mini-del" title="Desconectar VOX"><i class="fa-solid fa-link-slash"></i></button>
-                            </form>
+                {% set vox_ch = u.channels | selectattr('tipo', 'equalto', 'VOX') | first %}
+                {% set tir_ch = u.channels | selectattr('tipo', 'equalto', 'TIRADAS') | first %}
+
+                <td class="channel-cell" id="ch-container-vox-{{ u.id }}" data-chid="{{ vox_ch.id if vox_ch else '' }}">
+                    {% if vox_ch %}
+                        <div class="channel-header">
+                            <span class="badge {{ 'bg-online' if vox_ch.status == 'online' else 'bg-waiting' if vox_ch.status == 'waiting' else 'bg-offline' }}">{{ vox_ch.status|upper }}</span>
+                            <span class="last-seen">{{ vox_ch.last_check.strftime('%H:%M') if vox_ch.last_check else '-' }}</span>
                         </div>
-                    {% elif u.device_pairing_code %}
-                        <span class="pairing-code txt-vox">{{ u.device_pairing_code }}</span>
+                        {% if vox_ch.token %}
+                            <div class="token-row">
+                                <div class="token-wrapper" style="border-left: 3px solid #17a2b8;">
+                                    <input type="text" class="token-input" id="token-{{ vox_ch.id }}" value="{{ vox_ch.token }}" readonly onclick="this.select()">
+                                    <button class="btn-copy-mini" onclick="copiarInput('token-{{ vox_ch.id }}')"><i class="fa-regular fa-copy"></i></button>
+                                </div>
+                                <form method="POST" onsubmit="return confirm('¿Desconectar este canal?');">
+                                    <input type="hidden" name="channel_id" value="{{ vox_ch.id }}">
+                                    <input type="hidden" name="revoke_channel" value="1">
+                                    <button type="submit" class="btn-mini-del"><i class="fa-solid fa-link-slash"></i></button>
+                                </form>
+                            </div>
+                        {% elif vox_ch.code %}
+                            <span class="pairing-code" style="color:#17a2b8;">{{ vox_ch.code }}</span>
+                        {% else %}
+                            <small style="color:#ccc;">No vinculado</small>
+                            <form method="POST" style="display:inline; float:right;" onsubmit="return confirm('¿Borrar canal?');">
+                                <input type="hidden" name="channel_id" value="{{ vox_ch.id }}">
+                                <input type="hidden" name="delete_channel" value="1">
+                                <button type="submit" style="background:none; border:none; color:#ddd; cursor:pointer;"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                        {% endif %}
                     {% else %}
-                        <small style="color:#ccc;">No vinculado</small>
+                        <small style="color:#eee;">-</small>
                     {% endif %}
                 </td>
 
-                <td class="channel-cell" id="tiradas-cell-{{ u.id }}">
-                    <div class="channel-header">
-                        {% if u.status_tiradas == 'online' %}<span class="badge bg-online">ONLINE</span>
-                        {% elif u.status_tiradas == 'waiting' %}<span class="badge bg-waiting">WAITING</span>
-                        {% else %}<span class="badge bg-offline">OFFLINE</span>{% endif %}
-                        <span class="last-seen">{{ u.last_check_tiradas.strftime('%H:%M') if u.last_check_tiradas else '-' }}</span>
-                    </div>
-
-                    {% if u.token_tiradas %}
-                        <div class="token-row">
-                            <div class="token-wrapper" style="border-left: 3px solid #e67e22;">
-                                <input type="text" class="token-input" id="tiradas-input-{{ u.id }}" value="{{ u.token_tiradas }}" readonly onclick="this.select()">
-                                <button class="btn-copy-mini" onclick="copiarInput('tiradas-input-{{ u.id }}')"><i class="fa-regular fa-copy"></i></button>
-                            </div>
-                            <form method="POST" onsubmit="return confirm('¿Desvincular solo Tiradas?');">
-                                <input type="hidden" name="user_id" value="{{ u.id }}">
-                                <input type="hidden" name="revoke_tiradas" value="1">
-                                <button type="submit" class="btn-mini-del" title="Desconectar Tiradas"><i class="fa-solid fa-link-slash"></i></button>
-                            </form>
+                <td class="channel-cell" id="ch-container-tiradas-{{ u.id }}" data-chid="{{ tir_ch.id if tir_ch else '' }}">
+                    {% if tir_ch %}
+                        <div class="channel-header">
+                            <span class="badge {{ 'bg-online' if tir_ch.status == 'online' else 'bg-waiting' if tir_ch.status == 'waiting' else 'bg-offline' }}">{{ tir_ch.status|upper }}</span>
+                            <span class="last-seen">{{ tir_ch.last_check.strftime('%H:%M') if tir_ch.last_check else '-' }}</span>
                         </div>
-                    {% elif u.code_tiradas %}
-                        <span class="pairing-code txt-tiradas">{{ u.code_tiradas }}</span>
+                        {% if tir_ch.token %}
+                            <div class="token-row">
+                                <div class="token-wrapper" style="border-left: 3px solid #e67e22;">
+                                    <input type="text" class="token-input" id="token-{{ tir_ch.id }}" value="{{ tir_ch.token }}" readonly onclick="this.select()">
+                                    <button class="btn-copy-mini" onclick="copiarInput('token-{{ tir_ch.id }}')"><i class="fa-regular fa-copy"></i></button>
+                                </div>
+                                <form method="POST" onsubmit="return confirm('¿Desconectar este canal?');">
+                                    <input type="hidden" name="channel_id" value="{{ tir_ch.id }}">
+                                    <input type="hidden" name="revoke_channel" value="1">
+                                    <button type="submit" class="btn-mini-del"><i class="fa-solid fa-link-slash"></i></button>
+                                </form>
+                            </div>
+                        {% elif tir_ch.code %}
+                            <span class="pairing-code" style="color:#e67e22;">{{ tir_ch.code }}</span>
+                        {% else %}
+                            <small style="color:#ccc;">No vinculado</small>
+                            <form method="POST" style="display:inline; float:right;" onsubmit="return confirm('¿Borrar canal?');">
+                                <input type="hidden" name="channel_id" value="{{ tir_ch.id }}">
+                                <input type="hidden" name="delete_channel" value="1">
+                                <button type="submit" style="background:none; border:none; color:#ddd; cursor:pointer;"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                        {% endif %}
                     {% else %}
-                        <small style="color:#ccc;">No vinculado</small>
+                        <small style="color:#eee;">-</small>
                     {% endif %}
                 </td>
 
                 <td style="text-align:center;">
-                    {% if u.id != current_user.id %}
-                    <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿ELIMINAR ESTACIÓN DEFINITIVAMENTE?');">
+                    <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿ELIMINAR ESTACIÓN?');">
                         <button type="submit" class="btn-trash-station" title="Eliminar Estación"><i class="fa-solid fa-trash"></i></button>
                     </form>
-                    {% endif %}
                 </td>
             </tr>
+            {% endif %}
             {% endfor %}
         </tbody>
     </table>
 </div>
 
 <script>
-    // --- FUNCIÓN DE COPIAR SEGURA ---
     function copiarInput(inputId) {
         var el = document.getElementById(inputId);
         if(!el) return;
         el.select();
         el.setSelectionRange(0, 99999);
-        try {
-            document.execCommand('copy');
-            // Feedback visual rápido
-            el.style.backgroundColor = "#d4edda";
-            setTimeout(() => el.style.backgroundColor = "transparent", 300);
-        } catch (err) {
-            alert("Copia manual requerida (Ctrl+C)");
-        }
+        try { document.execCommand('copy'); el.style.backgroundColor = "#d4edda"; setTimeout(() => el.style.backgroundColor = "transparent", 300); } catch (err) {}
     }
 
-    // --- ACTUALIZACIÓN DINÁMICA ---
-    // IMPORTANTE: Para que esto funcione, la API /admin/api/status-all en app.py 
-    // debe devolver los campos: status_tiradas, token_tiradas, code_tiradas, last_check_tiradas
-    
+    // ACTUALIZACIÓN DE ESTADOS (SOPORTA FORMATO NUEVO)
     function updateStatus() {
         const ind = document.getElementById('loading-indicator');
         ind.style.opacity = '1';
@@ -287,72 +292,52 @@
             .then(data => {
                 setTimeout(() => ind.style.opacity = '0', 500);
                 
+                // DATA ES UNA LISTA DE USUARIOS CON SU ARRAY DE CANALES
                 data.forEach(u => {
-                    updateChannel(u.id, 'vox', u.status, u.token, u.code, u.last_check, '#17a2b8', 'txt-vox');
-                    // Asumiendo que el JSON trae estos campos nuevos (si no, quedará igual)
-                    updateChannel(u.id, 'tiradas', u.status_tiradas, u.token_tiradas, u.code_tiradas, u.last_check_tiradas || '-', '#e67e22', 'txt-tiradas');
+                    u.channels.forEach(ch => {
+                        updateChannelUI(ch);
+                    });
                 });
             })
             .catch(() => ind.style.opacity = '0');
     }
 
-    function updateChannel(uid, prefix, status, token, code, time, color, txtClass) {
-        const cell = document.getElementById(`${prefix}-cell-${uid}`);
-        if(!cell) return;
-
-        // 1. Badge Status
-        let badge = '<span class="badge bg-offline">OFFLINE</span>';
-        if(status === 'online') badge = '<span class="badge bg-online">ONLINE</span>';
-        if(status === 'waiting') badge = '<span class="badge bg-waiting">WAITING</span>';
-
-        // 2. Content (Token vs Code vs None)
-        let content = `<small style="color:#ccc;">No vinculado</small>`;
+    function updateChannelUI(ch) {
+        // Buscamos el input del token usando el ID único del canal
+        const tokenInput = document.getElementById(`token-${ch.id}`);
         
-        if (token) {
-            // Check if input exists to update value instead of replacing HTML (preserves selection)
-            const inputId = `${prefix}-input-${uid}`;
-            const existingInput = document.getElementById(inputId);
-            
-            if(existingInput) {
-                if(existingInput.value !== token) existingInput.value = token;
-                // Update header only
-                const header = cell.querySelector('.channel-header');
-                if(header) header.innerHTML = `${badge} <span class="last-seen">${time}</span>`;
-                return; 
-            }
-            
-            // Aquí generamos el HTML con el botón de borrar específico
-            // NOTA: Para que el form funcione dinámicamente sin recargar la página, 
-            // necesitaríamos JS más complejo, pero para mantenerlo simple y funcional con Jinja/HTML puro:
-            // Usamos el mismo HTML que Jinja generaría.
-            
-            const actionName = prefix === 'vox' ? 'revoke_vox' : 'revoke_tiradas';
-            const confirmMsg = prefix === 'vox' ? '¿Desvincular solo VOX?' : '¿Desvincular solo Tiradas?';
-            const titleMsg = prefix === 'vox' ? 'Desconectar VOX' : 'Desconectar Tiradas';
-
-            content = `
-                <div class="token-row">
-                    <div class="token-wrapper" style="border-left: 3px solid ${color};">
-                        <input type="text" class="token-input" id="${prefix}-input-${uid}" value="${token}" readonly onclick="this.select()">
-                        <button class="btn-copy-mini" onclick="copiarInput('${prefix}-input-${uid}')"><i class="fa-regular fa-copy"></i></button>
-                    </div>
-                    <form method="POST" onsubmit="return confirm('${confirmMsg}');">
-                        <input type="hidden" name="user_id" value="${uid}">
-                        <input type="hidden" name="${actionName}" value="1">
-                        <button type="submit" class="btn-mini-del" title="${titleMsg}"><i class="fa-solid fa-link-slash"></i></button>
-                    </form>
-                </div>`;
-        } else if (code) {
-            content = `<span class="pairing-code ${txtClass}">${code}</span>`;
+        // Si hay token nuevo y el input existe, actualizamos
+        if (tokenInput && ch.token && tokenInput.value !== ch.token) {
+            tokenInput.value = ch.token;
         }
 
-        // Full Render if structure changed
-        cell.innerHTML = `
-            <div class="channel-header">
-                ${badge} <span class="last-seen">${time}</span>
-            </div>
-            ${content}
-        `;
+        // Si cambió de NO vinculado a Vinculado, recargamos (más fácil que manipular todo el DOM complejo)
+        // Esto pasa si antes no había input y ahora llega un token
+        if (!tokenInput && ch.token) {
+             // Opcional: location.reload(); 
+        }
+
+        // Actualizar badges
+        // Necesitamos encontrar el contenedor padre del canal.
+        // Como no tenemos el ID del user directo en 'ch' en todos los casos, buscamos por el input
+        // O buscamos por el atributo data-chid que pusimos en el TD
+        const td = document.querySelector(`td[data-chid="${ch.id}"]`);
+        if (td) {
+            const badge = td.querySelector('.badge');
+            if (badge) {
+                let cls = 'bg-offline';
+                if(ch.status === 'online') cls = 'bg-online';
+                if(ch.status === 'waiting') cls = 'bg-waiting';
+                badge.className = `badge ${cls}`;
+                badge.innerText = ch.status.toUpperCase();
+            }
+            const time = td.querySelector('.last-seen');
+            if (time) time.innerText = ch.last_check;
+            
+            // Si el código cambió
+            const codeSpan = td.querySelector('.pairing-code');
+            if (codeSpan && ch.code) codeSpan.innerText = ch.code;
+        }
     }
 
     setInterval(updateStatus, 3000);
