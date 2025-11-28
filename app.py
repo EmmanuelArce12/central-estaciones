@@ -49,7 +49,7 @@ class User(UserMixin, db.Model):
     
     # --- CANAL 2: TIRADAS (Sobres/CSV) ---
     token_tiradas = db.Column(db.String(100), unique=True, nullable=True) # Token exclusivo Tiradas
-    code_tiradas = db.Column(db.String(20), nullable=True)                # Código de vinculación (AAA-11)
+    code_tiradas = db.Column(db.String(20), nullable=True)                # Código de vinculación
     status_tiradas = db.Column(db.String(20), default='offline')          # Estado PC Tiradas
     last_check_tiradas = db.Column(db.DateTime)                           # Latido PC Tiradas
     comando_tiradas = db.Column(db.String(50), nullable=True)             # Ordenes (Subir ahora)
@@ -59,7 +59,7 @@ class User(UserMixin, db.Model):
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False, cascade="all, delete-orphan")
     reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
     
-    # Agregamos la relación con Tiradas para mantener el orden
+    # Relación con Tiradas
     tiradas = db.relationship('Tirada', backref='usuario', lazy=True, cascade="all, delete-orphan")
     ventas_vendedor = db.relationship('VentaVendedor', backref='usuario', lazy=True, cascade="all, delete-orphan")
 
@@ -67,6 +67,7 @@ class User(UserMixin, db.Model):
     def check_password(self, p): return check_password_hash(self.password_hash, p)
     @property
     def is_superadmin(self): return self.role == 'superadmin'
+
 class Cliente(db.Model):
     __tablename__ = 'clientes'
     id = db.Column(db.Integer, primary_key=True)
@@ -157,7 +158,7 @@ def procesar_datos_turno(s):
         print(f"Error parseando fecha: {s} -> {e}")
         return None, None, None, None
 
-# --- VISTAS ---
+# --- VISTAS BÁSICAS ---
 
 @app.route('/')
 def root():
@@ -185,6 +186,8 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
+# --- VISTAS ADMIN ---
+
 @app.route('/admin/dashboard', methods=['GET', 'POST'])
 @login_required
 def panel_superadmin():
@@ -207,7 +210,7 @@ def panel_superadmin():
                     db.session.commit()
                 msg = "✅ Usuario creado."
 
-        # 2. VINCULAR CANAL 1 (VOX / SURTIDORES)
+        # 2. VINCULAR CANAL 1 (VOX)
         elif 'link_pc' in request.form:
             code = request.form.get('pairing_code', '').strip().upper()
             u = User.query.get(request.form.get('user_id'))
@@ -215,7 +218,7 @@ def panel_superadmin():
                 u.device_pairing_code = code; u.status_conexion = "waiting"; db.session.commit()
                 msg = f"🔗 Esperando PC VOX: {code}"
 
-        # 3. VINCULAR CANAL 2 (TIRADAS / SOBRES) <-- ¡NUEVO!
+        # 3. VINCULAR CANAL 2 (TIRADAS)
         elif 'link_tiradas' in request.form:
             code = request.form.get('pairing_code', '').strip().upper()
             u = User.query.get(request.form.get('user_id'))
@@ -225,20 +228,20 @@ def panel_superadmin():
                 db.session.commit()
                 msg = f"🔗 Esperando PC Tiradas: {code}"
 
-        # 4. REVOCAR ACCESOS (Limpia todo)
+        # 4. REVOCAR TODO
         elif 'revoke' in request.form:
             u = User.query.get(request.form.get('user_id'))
             if u: 
-                # Limpiar Canal 1
+                # Canal 1
                 u.api_token = None; u.status_conexion = "offline"; u.device_pairing_code = None
-                # Limpiar Canal 2
+                # Canal 2
                 u.token_tiradas = None; u.status_tiradas = "offline"; u.code_tiradas = None
-                
                 db.session.commit()
                 msg = "🚫 Acceso revocado (Ambos canales)."
 
     users = User.query.all()
     return render_template('admin_dashboard.html', users=users, msg=msg)
+
 @app.route('/admin/eliminar-estacion/<int:id>', methods=['POST'])
 @login_required
 def eliminar_estacion(id):
@@ -247,6 +250,40 @@ def eliminar_estacion(id):
     if user.id == current_user.id: return "Error"
     db.session.delete(user); db.session.commit()
     return redirect(url_for('panel_superadmin'))
+
+@app.route('/admin/api/status-all')
+@login_required
+def admin_status_all():
+    if not current_user.is_superadmin: return jsonify([])
+    users = User.query.all()
+    data = []
+    ahora = datetime.now()
+    for u in users:
+        # Estado Canal 1
+        st = u.status_conexion
+        if u.last_check and (ahora - u.last_check).total_seconds() > 120: st = 'offline'
+        
+        # Estado Canal 2
+        st_tiradas = u.status_tiradas
+        if u.last_check_tiradas and (ahora - u.last_check_tiradas).total_seconds() > 120: st_tiradas = 'offline'
+
+        data.append({
+            "id": u.id, 
+            "username": u.username,
+            "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "Sin Nombre",
+            "status": st, 
+            "code": u.device_pairing_code, 
+            "token": u.api_token, 
+            "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca",
+            # Datos Canal 2
+            "status_tiradas": st_tiradas,
+            "token_tiradas": u.token_tiradas,
+            "code_tiradas": u.code_tiradas,
+            "last_check_tiradas": u.last_check_tiradas.strftime('%H:%M') if u.last_check_tiradas else '-'
+        })
+    return jsonify(data)
+
+# --- VISTAS ESTACIÓN ---
 
 @app.route('/estacion/panel')
 @login_required
@@ -285,7 +322,7 @@ def config_vox():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-# --- APIS DEL SISTEMA ---
+# --- APIS CANAL 1 (VOX) ---
 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_poll():
@@ -300,23 +337,19 @@ def handshake_poll():
         return jsonify({"status": "linked", "api_token": user.api_token}), 200
     return jsonify({"status": "waiting"}), 200
 
-# API DE LATIDO (Heartbeat) - CORREGIDA
 @app.route('/api/agent/sync', methods=['POST'])
 def agent_sync():
     token = request.headers.get('X-API-TOKEN')
     user = User.query.filter_by(api_token=token).first()
     if not user: return jsonify({"status": "revoked"}), 401
     
-    # ACTUALIZAR SIEMPRE LA HORA PARA QUE APAREZCA ONLINE
     user.status_conexion = 'online'
     user.last_check = datetime.now()
     
-    # Revisar si hay orden
     cmd = user.comando_pendiente
-    
-    # Si la orden es EXTRACT, la limpiamos después de enviarla.
-    # Si la orden es UPLOAD_TIRADAS, NO la limpiamos aquí, esperamos a que el agente la ejecute.
-    # (Para simplificar, el agente debería limpiar, pero por ahora enviamos el comando)
+    # Limpiamos EXTRACT, pero si es de tiradas no deberia estar aqui
+    if cmd == 'EXTRACT': 
+        user.comando_pendiente = None
     
     conf = {}
     if user.credenciales_vox:
@@ -342,21 +375,15 @@ def rep():
         if not f_op: return jsonify({"status":"error_fecha"}), 400
 
         r = Reporte(
-            user_id=u.id, 
-            id_interno=nid, 
-            estacion=n.get('estacion'), 
-            fecha_completa=n.get('fecha'), 
-            monto=n.get('monto'), 
-            fecha_operativa=f_op, 
-            turno=turno, 
-            hora_cierre=dt_cierre,
-            hora_apertura=dt_apertura
+            user_id=u.id, id_interno=nid, estacion=n.get('estacion'), 
+            fecha_completa=n.get('fecha'), monto=n.get('monto'), 
+            fecha_operativa=f_op, turno=turno, 
+            hora_cierre=dt_cierre, hora_apertura=dt_apertura
         )
         db.session.add(r)
         db.session.commit()
         return jsonify({"status":"exito"}), 200
     except Exception as e: 
-        print(e)
         return jsonify({"status":"error"}), 500
 
 @app.route('/api/ping-ui')
@@ -372,133 +399,69 @@ def lanzar():
     current_user.comando_pendiente = 'EXTRACT'; db.session.commit()
     return jsonify({"status": "ok"})
 
-# --- API RESUMEN REPORTES (¡RESTAURADA!) ---
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
 def api_res(fecha):
     reps = Reporte.query.filter_by(fecha_operativa=fecha, user_id=current_user.id).all()
-    
     agrupado = {}
     
-    # 1. Agrupar datos
     for r in reps:
         if r.turno not in agrupado:
-            agrupado[r.turno] = {
-                "monto": 0.0, 
-                "apertura": r.hora_apertura, 
-                "cierre": r.hora_cierre, 
-                "count": 0
-            }
-        
+            agrupado[r.turno] = { "monto": 0.0, "apertura": r.hora_apertura, "cierre": r.hora_cierre, "count": 0 }
         agrupado[r.turno]["monto"] += r.monto
         agrupado[r.turno]["count"] += 1
         
-        # Actualizar extremos
         if r.hora_apertura and (not agrupado[r.turno]["apertura"] or r.hora_apertura < agrupado[r.turno]["apertura"]):
             agrupado[r.turno]["apertura"] = r.hora_apertura
         if r.hora_cierre and (not agrupado[r.turno]["cierre"] or r.hora_cierre > agrupado[r.turno]["cierre"]):
             agrupado[r.turno]["cierre"] = r.hora_cierre
 
-    # 2. Generar lista ordenada (Mañana -> Tarde -> Noche)
     salida = []
-    orden_turnos = ["Mañana", "Tarde", "Noche"]
-
-    for turno in orden_turnos:
+    for turno in ["Mañana", "Tarde", "Noche"]:
         if turno in agrupado:
-            datos = agrupado[turno]
-            ini = datos["apertura"].strftime("%H:%M:%S") if datos["apertura"] else "??"
-            fin = datos["cierre"].strftime("%H:%M:%S") if datos["cierre"] else "??"
-            
-            salida.append({
-                "turno": turno,
-                "monto": datos["monto"],
-                "cantidad_cierres": datos["count"],
-                "horario_real": f"{ini} a {fin}" 
-            })
+            d = agrupado[turno]
+            ini = d["apertura"].strftime("%H:%M:%S") if d["apertura"] else "??"
+            fin = d["cierre"].strftime("%H:%M:%S") if d["cierre"] else "??"
+            salida.append({ "turno": turno, "monto": d["monto"], "cantidad_cierres": d["count"], "horario_real": f"{ini} a {fin}" })
         
     return jsonify(salida)
 
-@app.route('/admin/api/status-all')
-@login_required
-def admin_status_all():
-    if not current_user.is_superadmin: return jsonify([])
-    users = User.query.all()
-    data = []
-    ahora = datetime.now()
-    for u in users:
-        st = u.status_conexion
-        if u.last_check and (ahora - u.last_check).total_seconds() > 120: st = 'offline'
-        
-        data.append({
-            "id": u.id, 
-            "username": u.username,
-            "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "Sin Nombre",
-            "status": st, 
-            "code": u.device_pairing_code, 
-            "token": u.api_token, 
-            "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca",
-            "status_tiradas": u.status_tiradas,
-            "token_tiradas": u.token_tiradas,
-            "code_tiradas": u.code_tiradas,
-            "last_check_tiradas": u.last_check_tiradas.strftime('%H:%M') if u.last_check_tiradas else '-'
-            })
-    return jsonify(data)
+# --- MÓDULO VENTAS VENDEDOR ---
 
-# --- MÓDULO VENTAS POR VENDEDOR ---
 @app.route('/estacion/ventas-vendedor', methods=['GET'])
 @login_required
 def ver_ventas_vendedor():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
-    
-    # 1. Obtener las reglas de juego (Horarios de los turnos) desde Reportes
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     
-    limites_turnos = {
-        "Mañana": {"inicio": None, "fin": None},
-        "Tarde": {"inicio": None, "fin": None},
-        "Noche": {"inicio": None, "fin": None}
-    }
+    limites_turnos = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
     
     for r in reportes:
         if r.turno in limites_turnos:
             if r.hora_apertura:
                 t_ini = r.hora_apertura.time()
-                if limites_turnos[r.turno]["inicio"] is None or t_ini < limites_turnos[r.turno]["inicio"]:
-                    limites_turnos[r.turno]["inicio"] = t_ini
-            
+                if limites_turnos[r.turno]["inicio"] is None or t_ini < limites_turnos[r.turno]["inicio"]: limites_turnos[r.turno]["inicio"] = t_ini
             if r.hora_cierre:
                 t_fin = r.hora_cierre.time()
-                if limites_turnos[r.turno]["fin"] is None or t_fin > limites_turnos[r.turno]["fin"]:
-                    limites_turnos[r.turno]["fin"] = t_fin
+                if limites_turnos[r.turno]["fin"] is None or t_fin > limites_turnos[r.turno]["fin"]: limites_turnos[r.turno]["fin"] = t_fin
 
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
-    
     ventas_por_turno = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
     total_litros = 0; total_plata = 0
 
     for v in ventas:
-        total_litros += v.litros
-        total_plata += v.monto
-        asignado = False
-        
+        total_litros += v.litros; total_plata += v.monto; asignado = False
         try:
-            if not v.primer_horario or v.primer_horario == '-': raise ValueError("Sin hora")
+            if not v.primer_horario or v.primer_horario == '-': raise ValueError
             hora_venta = datetime.strptime(v.primer_horario, "%H:%M:%S").time()
         except:
-            ventas_por_turno["Sin Asignar"].append(v)
-            continue
+            ventas_por_turno["Sin Asignar"].append(v); continue
 
         for nombre_turno, limites in limites_turnos.items():
-            ini = limites["inicio"]
-            fin = limites["fin"]
-            
+            ini, fin = limites["inicio"], limites["fin"]
             if ini and fin:
-                if ini < fin:
-                    if ini <= hora_venta <= fin:
-                        ventas_por_turno[nombre_turno].append(v); asignado = True; break
-                else:
-                    if hora_venta >= ini or hora_venta <= fin:
-                        ventas_por_turno[nombre_turno].append(v); asignado = True; break
+                if (ini < fin and ini <= hora_venta <= fin) or (ini > fin and (hora_venta >= ini or hora_venta <= fin)):
+                    ventas_por_turno[nombre_turno].append(v); asignado = True; break
         
         if not asignado:
             h = hora_venta.hour
@@ -519,93 +482,68 @@ def subir_ventas_vendedor():
         df_raw = pd.read_excel(archivo, header=None)
         fila_tabla = -1
         for i, row in df_raw.iterrows():
-            fila_texto = row.astype(str).str.lower().str.strip()
-            if (fila_texto.str.contains('vendedor').any() and fila_texto.str.contains('importe').any()):
+            if row.astype(str).str.contains('Vendedor').any() and row.astype(str).str.contains('Importe').any():
                 fila_tabla = i; break
 
-        if fila_tabla == -1:
-            flash("❌ No se pudo detectar la tabla real de ventas.", "error")
-            return redirect(url_for('ver_ventas_vendedor'))
+        if fila_tabla == -1: flash("Error: Formato no reconocido", "error"); return redirect(url_for('ver_ventas_vendedor'))
 
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
-        df.columns = df.columns.astype(str).str.strip().str.lower()
-
-        try:
-            col_fecha = [c for c in df.columns if 'fecha' in c][0]
-            col_vendedor = [c for c in df.columns if 'vendedor' in c][0]
-            col_producto = [c for c in df.columns if 'producto' in c][0]
-            col_litros = [c for c in df.columns if 'vol' in c][0]
-            col_importe = [c for c in df.columns if 'importe' in c][0]
-            col_precio = next((c for c in df.columns if 'precio' in c), None)
-            col_duracion = next((c for c in df.columns if 'duración' in c or 'duracion' in c), None)
-            col_pago = next((c for c in df.columns if 'tipo' in c), None)
-        except IndexError:
-            flash("❌ Faltan columnas requeridas.", "error")
-            return redirect(url_for('ver_ventas_vendedor'))
-
-        cols_to_keep = { col_fecha: "Fecha", col_vendedor: "Vendedor", col_producto: "Combustible", col_litros: "Litros", col_importe: "Importe" }
-        if col_precio: cols_to_keep[col_precio] = "Precio"
-        if col_duracion: cols_to_keep[col_duracion] = "DuracionSeg"
-        if col_pago: cols_to_keep[col_pago] = "TipoPago"
-
-        df = df[list(cols_to_keep.keys())].rename(columns=cols_to_keep)
-        df = df.dropna(subset=["Vendedor"])
-        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-        fechas_validas = df['Fecha_DT'].dropna()
-        if fechas_validas.empty:
-            flash("❌ No se encontraron fechas válidas.", "error"); return redirect(url_for('ver_ventas_vendedor'))
-
-        fecha_auto = fechas_validas.dt.date.mode()[0].strftime('%Y-%m-%d')
+        df.columns = df.columns.astype(str).str.strip().str.title()
         
-        def limpiar_numero(val):
-            if isinstance(val, (int, float)): return float(val)
-            val = str(val).strip()
-            if val in ["", "-", "nan", "none"]: return 0.0
-            val = val.replace(".", "").replace(",", ".")
-            try: return float(val)
+        # Mapeo flexible
+        map_cols = {}
+        for c in df.columns:
+            if 'Fecha' in c: map_cols[c] = 'Fecha'
+            if 'Vendedor' in c: map_cols[c] = 'Vendedor'
+            if 'Producto' in c: map_cols[c] = 'Combustible'
+            if 'Vol' in c: map_cols[c] = 'Litros'
+            if 'Importe' in c: map_cols[c] = 'Importe'
+            if 'Precio' in c: map_cols[c] = 'Precio'
+            if 'Duracion' in c or 'Duración' in c: map_cols[c] = 'DuracionSeg'
+            if 'Tipo' in c: map_cols[c] = 'TipoPago'
+
+        df = df.rename(columns=map_cols)
+        df = df.dropna(subset=["Vendedor"])
+        
+        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+        if df['Fecha_DT'].dropna().empty: flash("Sin fechas válidas", "error"); return redirect(url_for('ver_ventas_vendedor'))
+        
+        fecha_auto = df['Fecha_DT'].dropna().dt.date.mode()[0].strftime('%Y-%m-%d')
+        
+        def safe_float(x):
+            try: return float(str(x).replace('.','').replace(',','.'))
             except: return 0.0
 
-        for col in ["Litros", "Importe", "Precio", "DuracionSeg"]:
-            if col in df.columns: df[col] = df[col].apply(limpiar_numero)
+        for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
+            if col in df.columns: df[col] = df[col].apply(safe_float)
 
-        agregaciones = { "Fecha": "first", "Litros": "sum", "Importe": "sum" }
-        if "Precio" in df.columns: agregaciones["Precio"] = "first"
-        if "TipoPago" in df.columns: agregaciones["TipoPago"] = "first"
-        if "DuracionSeg" in df.columns: agregaciones["DuracionSeg"] = "sum"
+        agregaciones = { 'Fecha': 'first', 'Litros': 'sum', 'Importe': 'sum' }
+        if 'Precio' in df.columns: agregaciones['Precio'] = 'first'
+        if 'TipoPago' in df.columns: agregaciones['TipoPago'] = 'first'
+        if 'DuracionSeg' in df.columns: agregaciones['DuracionSeg'] = 'sum'
 
-        resumen = df.sort_values("Fecha_DT").groupby(["Vendedor", "Combustible"]).agg(agregaciones).reset_index()
-
+        resumen = df.sort_values('Fecha_DT').groupby(['Vendedor', 'Combustible']).agg(agregaciones).reset_index()
+        
         VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).delete()
-
+        
         for _, row in resumen.iterrows():
-            hora_str = "-"
-            try:
-                if pd.notnull(row['Fecha']): hora_str = pd.to_datetime(row['Fecha']).strftime('%H:%M:%S')
-            except: pass
-
-            nueva = VentaVendedor(
-                user_id=current_user.id,
-                fecha=fecha_auto,
-                vendedor=row['Vendedor'],
-                combustible=row['Combustible'],
-                litros=round(row['Litros'], 2),
-                monto=round(row['Importe'], 2),
-                precio=round(row.get('Precio', 0), 2),
-                primer_horario=hora_str,
-                tipo_pago=str(row.get('TipoPago', '-')),
-                duracion_seg=row.get('DuracionSeg', 0)
-            )
-            db.session.add(nueva)
-
+            hora = pd.to_datetime(row['Fecha']).strftime('%H:%M:%S') if pd.notnull(row['Fecha']) else "-"
+            
+            db.session.add(VentaVendedor(
+                user_id=current_user.id, fecha=fecha_auto, vendedor=row['Vendedor'], combustible=row['Combustible'],
+                litros=row['Litros'], monto=row['Importe'], precio=row.get('Precio',0), primer_horario=hora,
+                tipo_pago=str(row.get('TipoPago','-')), duracion_seg=row.get('DuracionSeg',0)
+            ))
+        
         db.session.commit()
         return redirect(url_for('ver_ventas_vendedor', fecha=fecha_auto))
 
     except Exception as e:
-        flash(f"Error procesando: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))
+        flash(f"Error: {e}", "error"); return redirect(url_for('ver_ventas_vendedor'))
 
-# --- MÓDULO TIRADAS ---
+# --- MÓDULO TIRADAS (CANAL 2) ---
+
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas():
@@ -617,25 +555,22 @@ def ver_tiradas():
 @app.route('/estacion/subir-tiradas', methods=['POST'])
 @login_required
 def subir_tiradas():
+    # Esta ruta es para subida manual desde el navegador
+    # Para simplificar, redirigimos, pero aquí se podría implementar la lectura de CSV manual
+    # usando la misma lógica que la API pero con current_user.id
     if 'archivo' not in request.files: return redirect(url_for('ver_tiradas'))
-    archivo = request.files['archivo']
-    if not archivo.filename: return redirect(url_for('ver_tiradas'))
-    
-    # Reutilizamos la lógica de la API para no duplicar código
-    # ... (La lógica manual está implementada en la API, pero aquí dejamos la redirección simple)
-    # Por brevedad, si el usuario sube manual, procesamos igual que la API pero obteniendo ID de current_user
     return redirect(url_for('ver_tiradas'))
 
-# 1. API DE RECEPCIÓN (Aquí ocurre la ASOCIACIÓN DEL ID)
+# 1. API DE RECEPCIÓN (Usa token_tiradas)
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
     token = request.headers.get('X-API-TOKEN')
-    user = User.query.filter_by(api_token=token).first()
-    if not user: return jsonify({"status": "error", "msg": "Token invalido"}), 401
-
-    if 'archivo' not in request.files: return jsonify({"status": "error", "msg": "Sin archivo"}), 400
-    archivo = request.files['archivo']
+    user = User.query.filter_by(token_tiradas=token).first() # BUSCAR POR TOKEN TIRADAS
     
+    if not user: return jsonify({"status": "error", "msg": "Token invalido"}), 401
+    if 'archivo' not in request.files: return jsonify({"status": "error", "msg": "Sin archivo"}), 400
+    
+    archivo = request.files['archivo']
     try:
         try:
             df = pd.read_csv(archivo)
@@ -643,15 +578,19 @@ def api_recepcion_tiradas():
         except: return jsonify({"status": "error", "msg": "Formato CSV invalido"}), 400
 
         df.columns = df.columns.astype(str).str.lower().str.strip()
+        
+        # Mapeo flexible de columnas
         col_monto = next((c for c in df.columns if 'monto' in c or 'importe' in c), None)
         col_vend = next((c for c in df.columns if 'vendedor' in c or 'nombre' in c), None)
         col_hora = next((c for c in df.columns if 'hora' in c), None)
         col_turno = next((c for c in df.columns if 'turno' in c), None)
         col_sector = next((c for c in df.columns if 'sector' in c), None)
 
-        if not col_monto or not col_vend: return jsonify({"status": "error", "msg": "Columnas faltantes"}), 400
+        if not col_monto or not col_vend: return jsonify({"status": "error", "msg": "Faltan columnas Vendedor/Monto"}), 400
 
         fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+        
+        # Buscar coincidencias de nombre
         ventas_existentes = VentaVendedor.query.filter_by(user_id=user.id, fecha=fecha_hoy).all()
         nombres_oficiales = list(set([v.vendedor for v in ventas_existentes]))
 
@@ -665,77 +604,60 @@ def api_recepcion_tiradas():
                 matches = difflib.get_close_matches(nombre_csv, nombres_oficiales, n=1, cutoff=0.4)
                 if matches: nombre_final = matches[0]
 
-            try: monto_val = float(str(row[col_monto]).replace('$','').replace('.','').replace(',','.'))
-            except: monto_val = 0.0
+            try: val = float(str(row[col_monto]).replace('$','').replace('.','').replace(',','.'))
+            except: val = 0.0
 
-            nueva = Tirada(
-                user_id=user.id,
-                fecha_operativa=fecha_hoy,
-                vendedor=nombre_final,
-                vendedor_raw=nombre_csv,
-                monto=monto_val,
-                hora=str(row[col_hora]) if col_hora else "-",
-                turno=str(row[col_turno]) if col_turno else "-",
-                sector=str(row[col_sector]) if col_sector else "-"
-            )
-            db.session.add(nueva)
+            db.session.add(Tirada(
+                user_id=user.id, fecha_operativa=fecha_hoy, vendedor=nombre_final, vendedor_raw=nombre_csv,
+                monto=val, hora=str(row[col_hora]) if col_hora else "-",
+                turno=str(row[col_turno]) if col_turno else "-", sector=str(row[col_sector]) if col_sector else "-"
+            ))
             count += 1
         
-        # IMPORTANTE: SI FUE SUBIDA EXITOSA, LIMPIAR LA ORDEN PENDIENTE
-        user.comando_pendiente = None
+        user.comando_tiradas = None # Limpiar orden
         db.session.commit()
         return jsonify({"status": "ok", "count": count}), 200
 
-    except Exception as e:
-        return jsonify({"status": "error", "msg": str(e)}), 500
+    except Exception as e: return jsonify({"status": "error", "msg": str(e)}), 500
 
+# 2. LANZAR ORDEN (Boton Naranja)
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_orden_tiradas():
-    current_user.comando_pendiente = 'UPLOAD_TIRADAS'
+    current_user.comando_tiradas = 'UPLOAD_TIRADAS'
     db.session.commit()
     return jsonify({"status": "ok"})
 
-# 2. API DE ESTADO (Para el Semáforo en el Frontend)
+# 3. SEMÁFORO Y ESTADO
 @app.route('/api/estado-tiradas')
 @login_required
 def estado_tiradas():
     is_online = False
-    if current_user.last_check:
-        delta = datetime.now() - current_user.last_check
-        # Damos un margen de 2 minutos para considerar online por temas de latencia
-        if delta.total_seconds() < 120: 
-            is_online = True
+    if current_user.last_check_tiradas:
+        delta = datetime.now() - current_user.last_check_tiradas
+        if delta.total_seconds() < 120: is_online = True
             
     return jsonify({
         "online": is_online,
-        "comando_pendiente": current_user.comando_pendiente == 'UPLOAD_TIRADAS',
-        "ultima_vez": current_user.last_check.strftime("%H:%M:%S") if current_user.last_check else "-"
+        "comando_pendiente": current_user.comando_tiradas == 'UPLOAD_TIRADAS',
+        "ultima_vez": current_user.last_check_tiradas.strftime("%H:%M:%S") if current_user.last_check_tiradas else "-"
     })
-# --- API VINCULACIÓN TIRADAS (HANDSHAKE) ---
+
+# 4. HANDSHAKE (Vinculación)
 @app.route('/api/handshake/tiradas', methods=['POST'])
 def handshake_tiradas():
     code = request.json.get('code', '').strip().upper()
-    if not code: return jsonify({"status": "waiting"}), 200
-    
-    # Buscamos quién tiene este código generado (asignado por el admin)
     user = User.query.filter_by(code_tiradas=code).first()
     
     if user:
-        # Generamos el token definitivo
-        if not user.token_tiradas: 
-            user.token_tiradas = secrets.token_hex(32)
-        
-        user.code_tiradas = None # Borramos el código, ya no sirve
-        user.status_tiradas = 'online'
+        if not user.token_tiradas: user.token_tiradas = secrets.token_hex(32)
+        user.code_tiradas = None; user.status_tiradas = 'online'
         user.last_check_tiradas = datetime.now()
         db.session.commit()
-        
         return jsonify({"status": "linked", "api_token": user.token_tiradas}), 200
-    
     return jsonify({"status": "waiting"}), 200
 
-# --- API LATIDO TIRADAS (SYNC) ---
+# 5. LATIDO (Sync)
 @app.route('/api/tiradas/sync', methods=['POST'])
 def tiradas_sync():
     token = request.headers.get('X-API-TOKEN')
@@ -745,12 +667,8 @@ def tiradas_sync():
     
     user.status_tiradas = 'online'
     user.last_check_tiradas = datetime.now()
-    
-    cmd = user.comando_tiradas
-    # No borramos el comando aquí, dejamos que la subida lo borre
-    
     db.session.commit()
-    return jsonify({"status": "ok", "command": cmd}), 200
+    return jsonify({"status": "ok", "command": user.comando_tiradas}), 200
 
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
