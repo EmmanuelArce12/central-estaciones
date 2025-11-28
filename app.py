@@ -640,7 +640,13 @@ def ver_tiradas():
     tiradas = Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     total_plata = sum([t.monto for t in tiradas])
     return render_template('tiradas.html', tiradas=tiradas, fecha=fecha, t_plata=total_plata, t_sobres=len(tiradas))
-
+# --- NUEVA RUTA PARA VER REPORTES (QUE DABA 404) ---
+@app.route('/estacion/ver-reportes')
+@login_required
+def ver_reportes_html():
+    # Esta función renderiza la página que te daba error 404
+    # Asegúrate de tener el archivo 'index.html' en la carpeta templates
+    return render_template('index.html', usuario=current_user.username)
 
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
