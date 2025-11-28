@@ -4,221 +4,232 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel Superadmin - Central VOX</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1, h2 { color: #333; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; padding: 20px; color: #333; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
         
-        /* Mensajes */
-        .alert { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 20px; }
-        .alert-error { background-color: #f8d7da; color: #721c24; }
+        h1 { margin: 0; color: #2c3e50; font-size: 1.5rem; }
+        h2 { margin-top: 30px; font-size: 1.2rem; color: #34495e; border-bottom: 2px solid #eee; padding-bottom: 10px; }
 
-        /* Formularios y Tarjetas */
-        .card { background: #fafafa; border: 1px solid #ddd; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .form-group { margin-bottom: 10px; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; }
-        input, select { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        /* ALERTAS */
+        .alert { padding: 12px; background-color: #d4edda; color: #155724; border-radius: 6px; margin-bottom: 20px; border-left: 5px solid #28a745; }
+        .alert-error { background-color: #f8d7da; color: #721c24; border-left-color: #dc3545; }
+
+        /* GRID DE TARJETAS SUPERIORES */
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
-        /* Botones Generales */
-        button { cursor: pointer; padding: 8px 15px; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
-        .btn-primary { background-color: #007bff; color: white; }
-        .btn-warning { background-color: #ffc107; color: #333; }
+        .card { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+        .card h3 { margin-top: 0; font-size: 1rem; display: flex; align-items: center; gap: 10px; }
         
-        /* Botones de Icono (Tabla) */
-        .btn-icon { padding: 6px 10px; font-size: 1rem; margin: 0 2px; }
-        .btn-trash { background-color: #ffebee; color: #c62828; }
+        /* Colores de Tarjetas */
+        .card-create { border-top: 4px solid #007bff; }
+        .card-vox { border-top: 4px solid #17a2b8; background-color: #fcfdfe; }
+        .card-tiradas { border-top: 4px solid #e67e22; background-color: #fffbf7; }
+
+        /* FORMULARIOS */
+        .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .form-group { flex: 1; }
+        label { display: block; font-weight: 600; font-size: 0.8rem; margin-bottom: 5px; color: #666; }
+        input, select { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 0.9rem; }
+        
+        /* BOTONES */
+        button { cursor: pointer; padding: 8px 15px; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+        .btn-primary { background-color: #007bff; color: white; width: 100%; }
+        .btn-primary:hover { background-color: #0056b3; }
+        
+        .btn-vox { background-color: #17a2b8; color: white; }
+        .btn-vox:hover { background-color: #138496; }
+        
+        .btn-tiradas { background-color: #e67e22; color: white; }
+        .btn-tiradas:hover { background-color: #d35400; }
+
+        .btn-trash { background-color: #ffebee; color: #c62828; padding: 6px 10px; }
         .btn-trash:hover { background-color: #ffcdd2; }
-        .btn-unlink { background-color: #fff3e0; color: #ef6c00; }
-        .btn-unlink:hover { background-color: #ffe0b2; }
+        .btn-unlink { background-color: #fff3e0; color: #ef6c00; padding: 6px 10px; }
 
-        /* Tabla */
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; vertical-align: middle; }
-        th { background-color: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.85rem; }
+        /* TABLA PRINCIPAL */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9rem; }
+        th { text-align: left; padding: 12px; background-color: #f8f9fa; color: #7f8c8d; text-transform: uppercase; font-size: 0.75rem; border-bottom: 2px solid #eee; }
+        td { padding: 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+        tr:hover { background-color: #fafafa; }
+
+        /* COMPONENTES VISUALES */
+        .badge { padding: 4px 8px; border-radius: 12px; font-weight: bold; font-size: 0.7rem; display: inline-block; min-width: 60px; text-align: center; }
+        .bg-online { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .bg-offline { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .bg-waiting { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+
+        /* TOKEN CONTAINER (INPUT + COPY) */
+        .token-wrapper { 
+            display: flex; align-items: center; gap: 0; border: 1px solid #ced4da; 
+            border-radius: 4px; overflow: hidden; max-width: 220px; background: white;
+        }
+        .token-input { 
+            border: none; padding: 4px 8px; font-family: monospace; font-size: 0.8rem; 
+            color: #555; width: 100%; outline: none; background: transparent;
+        }
+        .btn-copy-mini { 
+            background: #f1f3f5; color: #495057; border-left: 1px solid #ced4da; 
+            padding: 4px 8px; font-size: 0.8rem; border-radius: 0; 
+        }
+        .btn-copy-mini:hover { background: #e9ecef; }
+
+        .pairing-code { font-size: 1.1rem; font-weight: bold; letter-spacing: 1px; }
+        .txt-vox { color: #17a2b8; }
+        .txt-tiradas { color: #e67e22; }
         
-        /* ESTADOS DE CONEXIÓN */
-        .badge { padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; }
-        .status-online { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
-        .status-offline { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
-        .status-waiting { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        .channel-cell { min-width: 240px; }
+        .channel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .last-seen { font-size: 0.75rem; color: #999; margin-left: auto; }
 
-        /* TOKEN BOX (Mismo estilo, pero adaptado para Input) */
-        .token-container { 
-            display: flex; align-items: center; gap: 5px; 
-            background: #f1f3f4; padding: 5px 10px; border-radius: 6px; border: 1px dashed #ccc; 
-            max-width: 250px;
-        }
-        
-        /* INPUT TRANSPARENTE PARA EL TOKEN */
-        .token-display {
-            background: transparent;
-            border: none;
-            font-family: monospace;
-            color: #555;
-            font-size: 0.9rem;
-            width: 140px; /* Ancho suficiente */
-            outline: none;
-        }
-
-        .btn-copy { 
-            background: none; border: none; color: #007bff; cursor: pointer; font-size: 1.1rem; padding: 0;
-        }
-        .btn-copy:hover { color: #0056b3; transform: scale(1.1); }
-
-        /* CÓDIGO GRANDE */
-        .pairing-code { font-size: 1.1rem; font-weight: bold; color: #e67e22; letter-spacing: 1px; }
-
-        /* Animaciones */
-        .spinner {
-            width: 12px; height: 12px; border: 2px solid #856404; border-top: 2px solid transparent;
-            border-radius: 50%; animation: spin 1s linear infinite;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
-        .dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; }
-        .dot-green { background-color: #2e7d32; }
-        .dot-red { background-color: #c62828; }
+        /* Loader */
+        #loading-indicator { font-size: 0.8rem; color: #aaa; margin-left: 10px; opacity: 0; transition: opacity 0.3s; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h1>🛡️ Panel Superadmin</h1>
-        <a href="/logout" style="color:#c62828; font-weight:bold; text-decoration:none;"><i class="fa-solid fa-sign-out-alt"></i> Cerrar Sesión</a>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <div style="display:flex; align-items:center;">
+            <h1>🛡️ Panel Superadmin</h1>
+            <span id="loading-indicator"><i class="fa-solid fa-sync fa-spin"></i> Actualizando...</span>
+        </div>
+        <a href="/logout" style="color:#dc3545; text-decoration:none; font-weight:600;"><i class="fa-solid fa-power-off"></i> Salir</a>
     </div>
 
     {% if msg %}
-        <div class="alert {% if '❌' in msg %}alert-error{% endif %}">
+        <div class="alert {% if '❌' in msg or '🚫' in msg %}alert-error{% endif %}">
             {{ msg }}
         </div>
     {% endif %}
 
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div class="card">
-            <h3 style="margin-top:0"><i class="fa-solid fa-user-plus"></i> Nueva Estación</h3>
+    <div class="cards-grid">
+        
+        <div class="card card-create">
+            <h3><i class="fa-solid fa-user-plus"></i> Nueva Estación</h3>
             <form method="POST">
                 <input type="hidden" name="create_user" value="1">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <div class="form-group"><label>Usuario:</label><input type="text" name="username" required></div>
-                    <div class="form-group"><label>Clave:</label><input type="text" name="password" required></div>
-                    <div class="form-group"><label>Nombre Fantasía:</label><input type="text" name="nombre"></div>
-                    <div class="form-group"><label>Rol:</label>
-                        <select name="role">
-                            <option value="estacion">Estación</option>
-                            <option value="superadmin">Administrador</option>
-                        </select>
+                <div class="form-row">
+                    <div class="form-group"><label>Usuario</label><input type="text" name="username" required></div>
+                    <div class="form-group"><label>Clave</label><input type="text" name="password" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Fantasía</label><input type="text" name="nombre"></div>
+                    <div class="form-group"><label>Rol</label>
+                        <select name="role"><option value="estacion">Estación</option><option value="superadmin">Admin</option></select>
                     </div>
                 </div>
-                <button type="submit" class="btn-primary" style="width:100%"><i class="fa-solid fa-save"></i> Crear Usuario</button>
+                <button type="submit" class="btn-primary">Crear</button>
             </form>
         </div>
 
-        <div class="card">
-            <h3 style="margin-top:0"><i class="fa-solid fa-link"></i> Vinculación Manual</h3>
-            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Úsalo si el código automático falla.</p>
+        <div class="card card-vox">
+            <h3 class="txt-vox"><i class="fa-solid fa-gas-pump"></i> Vincular VOX (PC 1)</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Conexión para lectura de surtidores.</p>
             <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
                 <input type="hidden" name="link_pc" value="1">
-                <div style="flex-grow:1">
-                    <label>Estación:</label>
+                <div style="flex:1">
+                    <label>Estación</label>
                     <select name="user_id">
-                        {% for u in users %}
-                            {% if u.role != 'superadmin' %}
-                                <option value="{{ u.id }}">{{ u.username }}</option>
-                            {% endif %}
-                        {% endfor %}
+                        {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
                     </select>
                 </div>
-                <div style="width:120px">
-                    <label>Código:</label>
-                    <input type="text" name="pairing_code" placeholder="AAA-00">
-                </div>
-                <button type="submit" class="btn-warning"><i class="fa-solid fa-bolt"></i> Forzar</button>
+                <div style="width:90px"><label>Código</label><input type="text" name="pairing_code" placeholder="ABC-12"></div>
+                <button type="submit" class="btn-vox">Link</button>
             </form>
         </div>
+
+        <div class="card card-tiradas">
+            <h3 class="txt-tiradas"><i class="fa-solid fa-envelope-open-text"></i> Vincular Tiradas (PC 2)</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Conexión para subida de sobres/caja.</p>
+            <form method="POST" style="display:flex; gap:10px; align-items:flex-end;">
+                <input type="hidden" name="link_tiradas" value="1">
+                <div style="flex:1">
+                    <label>Estación</label>
+                    <select name="user_id">
+                        {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                    </select>
+                </div>
+                <div style="width:90px"><label>Código</label><input type="text" name="pairing_code" placeholder="XYZ-99"></div>
+                <button type="submit" class="btn-tiradas">Link</button>
+            </form>
+        </div>
+
     </div>
 
-    <h2 style="margin-top:30px;">
-        📡 Estado de Estaciones 
-        <span id="loading-indicator" style="font-size:0.5em; color:#bbb; font-weight:normal; opacity:0; transition:opacity 0.5s;">
-            <i class="fa-solid fa-sync fa-spin"></i> Actualizando...
-        </span>
-    </h2>
-    
+    <h2>📡 Estado de Conexiones</h2>
     <table>
         <thead>
             <tr>
-                <th style="width: 50px;">ID</th>
-                <th>Estación / Cliente</th>
-                <th>Estado Conexión</th>
-                <th>Vinculación / Token</th> 
-                <th>Última Señal</th>
-                <th>Acciones</th>
+                <th style="width:50px;">ID</th>
+                <th>Estación</th>
+                <th>Canal VOX (Surtidores)</th>
+                <th>Canal Tiradas (Sobres)</th>
+                <th style="width:100px;">Acciones</th>
             </tr>
         </thead>
-        <tbody id="users-table-body">
+        <tbody id="table-body">
             {% for u in users %}
             <tr id="row-{{ u.id }}">
                 <td>{{ u.id }}</td>
                 <td>
-                    <div style="font-weight:bold; font-size:1rem;">{{ u.username }}</div>
-                    <div style="font-size:0.85rem; color:#777;">
-                        <i class="fa-solid fa-store"></i> {{ u.cliente_info.nombre_fantasia if u.cliente_info else u.role }}
-                    </div>
+                    <strong style="font-size:1rem;">{{ u.username }}</strong><br>
+                    <span style="color:#777;">{{ u.cliente_info.nombre_fantasia }}</span>
                 </td>
                 
-                <td id="status-cell-{{ u.id }}">
-                    {% if u.status_conexion == 'online' %}
-                        <span class="badge status-online"><span class="dot dot-green"></span> ONLINE</span>
-                    {% elif u.status_conexion == 'waiting' %}
-                        <span class="badge status-waiting"><div class="spinner"></div> ESPERANDO</span>
-                    {% else %}
-                        <span class="badge status-offline"><span class="dot dot-red"></span> OFFLINE</span>
-                    {% endif %}
-                </td>
-
-                <td id="auth-cell-{{ u.id }}">
+                <td class="channel-cell" id="vox-cell-{{ u.id }}">
+                    <div class="channel-header">
+                        {% if u.status_conexion == 'online' %}<span class="badge bg-online">ONLINE</span>
+                        {% elif u.status_conexion == 'waiting' %}<span class="badge bg-waiting">WAITING</span>
+                        {% else %}<span class="badge bg-offline">OFFLINE</span>{% endif %}
+                        <span class="last-seen">{{ u.last_check.strftime('%H:%M') if u.last_check else '-' }}</span>
+                    </div>
+                    
                     {% if u.api_token %}
-                        <div class="token-container">
-                            <i class="fa-solid fa-key" style="font-size:0.8rem; color:#aaa;"></i>
-                            
-                            <input type="text" class="token-display" id="token-input-{{ u.id }}" 
-                                   value="{{ u.api_token }}" readonly onclick="this.select()">
-
-                            <button class="btn-copy" onclick="copiarToken('token-input-{{ u.id }}')" title="Copiar Token">
-                                <i class="fa-regular fa-copy"></i>
-                            </button>
+                        <div class="token-wrapper" style="border-left: 3px solid #17a2b8;">
+                            <input type="text" class="token-input" id="vox-input-{{ u.id }}" value="{{ u.api_token }}" readonly onclick="this.select()">
+                            <button class="btn-copy-mini" onclick="copiarInput('vox-input-{{ u.id }}')"><i class="fa-regular fa-copy"></i></button>
                         </div>
                     {% elif u.device_pairing_code %}
-                        <span class="pairing-code">{{ u.device_pairing_code }}</span>
+                        <span class="pairing-code txt-vox">{{ u.device_pairing_code }}</span>
                     {% else %}
-                        <span style="color:#ccc; font-style:italic;">Sin vincular</span>
+                        <small style="color:#ccc;">No vinculado</small>
                     {% endif %}
                 </td>
 
-                <td id="time-cell-{{ u.id }}" style="font-size:0.9rem;">
-                    {{ u.last_check.strftime('%d/%m %H:%M') if u.last_check else '-' }}
+                <td class="channel-cell" id="tiradas-cell-{{ u.id }}">
+                    <div class="channel-header">
+                        {% if u.status_tiradas == 'online' %}<span class="badge bg-online">ONLINE</span>
+                        {% elif u.status_tiradas == 'waiting' %}<span class="badge bg-waiting">WAITING</span>
+                        {% else %}<span class="badge bg-offline">OFFLINE</span>{% endif %}
+                        <span class="last-seen">{{ u.last_check_tiradas.strftime('%H:%M') if u.last_check_tiradas else '-' }}</span>
+                    </div>
+
+                    {% if u.token_tiradas %}
+                        <div class="token-wrapper" style="border-left: 3px solid #e67e22;">
+                            <input type="text" class="token-input" id="tiradas-input-{{ u.id }}" value="{{ u.token_tiradas }}" readonly onclick="this.select()">
+                            <button class="btn-copy-mini" onclick="copiarInput('tiradas-input-{{ u.id }}')"><i class="fa-regular fa-copy"></i></button>
+                        </div>
+                    {% elif u.code_tiradas %}
+                        <span class="pairing-code txt-tiradas">{{ u.code_tiradas }}</span>
+                    {% else %}
+                        <small style="color:#ccc;">No vinculado</small>
+                    {% endif %}
                 </td>
 
                 <td>
-                    <div style="display:flex;">
-                        <form method="POST" style="display:inline;">
-                            <input type="hidden" name="user_id" value="{{ u.id }}">
-                            <input type="hidden" name="revoke" value="1">
-                            <button type="submit" class="btn-icon btn-unlink" title="Desvincular PC">
-                                <i class="fa-solid fa-plug-circle-xmark"></i>
-                            </button>
-                        </form>
-                        {% if u.id != current_user.id %}
-                        <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿Eliminar esta estación y todos sus datos?');" style="display:inline;">
-                            <button type="submit" class="btn-icon btn-trash" title="Eliminar Estación">
-                                <i class="fa-solid fa-trash-can"></i>
-                            </button>
-                        </form>
-                        {% endif %}
-                    </div>
+                    <form method="POST" style="display:inline;" onsubmit="return confirm('¿Revocar TODOS los accesos de esta estación?');">
+                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                        <input type="hidden" name="revoke" value="1">
+                        <button type="submit" class="btn-unlink" title="Desvincular Todo"><i class="fa-solid fa-plug-circle-xmark"></i></button>
+                    </form>
+                    {% if u.id != current_user.id %}
+                    <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('¿ELIMINAR ESTACIÓN?');">
+                        <button type="submit" class="btn-trash" title="Borrar"><i class="fa-solid fa-trash-can"></i></button>
+                    </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -227,86 +238,85 @@
 </div>
 
 <script>
-    // --- FUNCIÓN DE COPIAR SEGURA (Usa el Input Visible) ---
-    function copiarToken(inputId) {
-        var inputElement = document.getElementById(inputId);
-        if (!inputElement) return;
-
-        // 1. Seleccionar el texto visualmente
-        inputElement.select();
-        inputElement.setSelectionRange(0, 99999); // Para móviles
-
-        // 2. Ejecutar comando de copia (Funciona siempre si hay input seleccionado)
+    // --- FUNCIÓN DE COPIAR SEGURA ---
+    function copiarInput(inputId) {
+        var el = document.getElementById(inputId);
+        if(!el) return;
+        el.select();
+        el.setSelectionRange(0, 99999);
         try {
-            var successful = document.execCommand('copy');
-            if (successful) {
-                alert("✅ Token copiado: " + inputElement.value.substring(0, 8) + "...");
-            } else {
-                alert("⚠️ No se pudo copiar autom. Presiona Ctrl+C ahora que está seleccionado.");
-            }
+            document.execCommand('copy');
+            // Feedback visual rápido
+            el.style.backgroundColor = "#d4edda";
+            setTimeout(() => el.style.backgroundColor = "transparent", 300);
         } catch (err) {
-            console.error(err);
-            alert("⚠️ Error. Copia el texto manualmente.");
+            alert("Copia manual requerida (Ctrl+C)");
         }
     }
 
-    // Polling para actualizar tabla sin recargar
+    // --- ACTUALIZACIÓN DINÁMICA ---
+    // IMPORTANTE: Para que esto funcione, la API /admin/api/status-all en app.py 
+    // debe devolver los campos: status_tiradas, token_tiradas, code_tiradas, last_check_tiradas
+    
     function updateStatus() {
+        const ind = document.getElementById('loading-indicator');
+        ind.style.opacity = '1';
+
         fetch('/admin/api/status-all')
-            .then(response => response.json())
+            .then(r => r.json())
             .then(data => {
-                const indicator = document.getElementById('loading-indicator');
-                indicator.style.opacity = '1';
-                setTimeout(() => indicator.style.opacity = '0', 800);
-
-                data.forEach(user => {
-                    const statusCell = document.getElementById(`status-cell-${user.id}`);
-                    const authCell = document.getElementById(`auth-cell-${user.id}`); 
-                    const timeCell = document.getElementById(`time-cell-${user.id}`);
-                    
-                    if (statusCell && authCell) {
-                        timeCell.innerText = user.last_check;
-
-                        // Actualizar Estado
-                        let htmlStatus = '';
-                        if (user.status === 'online') {
-                            htmlStatus = `<span class="badge status-online"><span class="dot dot-green"></span> ONLINE</span>`;
-                        } else if (user.status === 'waiting') {
-                            htmlStatus = `<span class="badge status-waiting"><div class="spinner"></div> ESPERANDO</span>`;
-                        } else {
-                            htmlStatus = `<span class="badge status-offline"><span class="dot dot-red"></span> OFFLINE</span>`;
-                        }
-                        if (statusCell.innerHTML.trim() !== htmlStatus.trim()) statusCell.innerHTML = htmlStatus;
-
-                        // Actualizar Token (SI EL INPUT EXISTE, SOLO CAMBIAMOS EL VALOR)
-                        if (user.token) {
-                            const inputExistente = document.getElementById(`token-input-${user.id}`);
-                            if (inputExistente) {
-                                // Si ya existe, solo actualizamos valor si cambió, no redibujamos todo
-                                if (inputExistente.value !== user.token) {
-                                    inputExistente.value = user.token;
-                                }
-                            } else {
-                                // Si no existe (recién vinculado), dibujamos la cajita
-                                authCell.innerHTML = `
-                                    <div class="token-container">
-                                        <i class="fa-solid fa-key" style="font-size:0.8rem; color:#aaa;"></i>
-                                        <input type="text" class="token-display" id="token-input-${user.id}" 
-                                            value="${user.token}" readonly onclick="this.select()">
-                                        <button class="btn-copy" onclick="copiarToken('token-input-${user.id}')" title="Copiar Token">
-                                            <i class="fa-regular fa-copy"></i>
-                                        </button>
-                                    </div>`;
-                            }
-                        } else if (user.code) {
-                            authCell.innerHTML = `<span class="pairing-code">${user.code}</span>`;
-                        } else {
-                            authCell.innerHTML = `<span style="color:#ccc; font-style:italic;">Sin vincular</span>`;
-                        }
-                    }
+                setTimeout(() => ind.style.opacity = '0', 500);
+                
+                data.forEach(u => {
+                    updateChannel(u.id, 'vox', u.status, u.token, u.code, u.last_check, '#17a2b8', 'txt-vox');
+                    // Asumiendo que el JSON trae estos campos nuevos (si no, quedará igual)
+                    updateChannel(u.id, 'tiradas', u.status_tiradas, u.token_tiradas, u.code_tiradas, u.last_check_tiradas || '-', '#e67e22', 'txt-tiradas');
                 });
             })
-            .catch(err => console.error("Error polling:", err));
+            .catch(() => ind.style.opacity = '0');
+    }
+
+    function updateChannel(uid, prefix, status, token, code, time, color, txtClass) {
+        const cell = document.getElementById(`${prefix}-cell-${uid}`);
+        if(!cell) return;
+
+        // 1. Badge Status
+        let badge = '<span class="badge bg-offline">OFFLINE</span>';
+        if(status === 'online') badge = '<span class="badge bg-online">ONLINE</span>';
+        if(status === 'waiting') badge = '<span class="badge bg-waiting">WAITING</span>';
+
+        // 2. Content (Token vs Code vs None)
+        let content = `<small style="color:#ccc;">No vinculado</small>`;
+        
+        if (token) {
+            // Check if input exists to update value instead of replacing HTML (preserves selection)
+            const inputId = `${prefix}-input-${uid}`;
+            const existingInput = document.getElementById(inputId);
+            
+            if(existingInput) {
+                if(existingInput.value !== token) existingInput.value = token;
+                // Update header only
+                const header = cell.querySelector('.channel-header');
+                if(header) header.innerHTML = `${badge} <span class="last-seen">${time}</span>`;
+                return; 
+            }
+            
+            content = `
+                <div class="token-wrapper" style="border-left: 3px solid ${color};">
+                    <input type="text" class="token-input" id="${prefix}-input-${uid}" value="${token}" readonly onclick="this.select()">
+                    <button class="btn-copy-mini" onclick="copiarInput('${prefix}-input-${uid}')"><i class="fa-regular fa-copy"></i></button>
+                </div>`;
+        } else if (code) {
+            content = `<span class="pairing-code ${txtClass}">${code}</span>`;
+        }
+
+        // Full Render if structure changed
+        cell.innerHTML = `
+            <div class="channel-header">
+                ${badge} <span class="last-seen">${time}</span>
+            </div>
+            ${content}
+        `;
     }
 
     setInterval(updateStatus, 3000);

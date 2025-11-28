@@ -39,21 +39,34 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
+    
+    # --- CANAL 1: VOX (Surtidores) ---
     api_token = db.Column(db.String(100), unique=True, nullable=True)
     device_pairing_code = db.Column(db.String(20), nullable=True)
     status_conexion = db.Column(db.String(20), default='offline')
     comando_pendiente = db.Column(db.String(50), nullable=True)
     last_check = db.Column(db.DateTime)
     
+    # --- CANAL 2: TIRADAS (Sobres/CSV) ---
+    token_tiradas = db.Column(db.String(100), unique=True, nullable=True) # Token exclusivo Tiradas
+    code_tiradas = db.Column(db.String(20), nullable=True)                # Código de vinculación (AAA-11)
+    status_tiradas = db.Column(db.String(20), default='offline')          # Estado PC Tiradas
+    last_check_tiradas = db.Column(db.DateTime)                           # Latido PC Tiradas
+    comando_tiradas = db.Column(db.String(50), nullable=True)             # Ordenes (Subir ahora)
+
+    # --- RELACIONES ---
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
     credenciales_vox = db.relationship('CredencialVox', backref='usuario', uselist=False, cascade="all, delete-orphan")
     reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
+    
+    # Agregamos la relación con Tiradas para mantener el orden
+    tiradas = db.relationship('Tirada', backref='usuario', lazy=True, cascade="all, delete-orphan")
+    ventas_vendedor = db.relationship('VentaVendedor', backref='usuario', lazy=True, cascade="all, delete-orphan")
 
     def set_password(self, p): self.password_hash = generate_password_hash(p)
     def check_password(self, p): return check_password_hash(self.password_hash, p)
     @property
     def is_superadmin(self): return self.role == 'superadmin'
-
 class Cliente(db.Model):
     __tablename__ = 'clientes'
     id = db.Column(db.Integer, primary_key=True)
@@ -177,7 +190,9 @@ def logout():
 def panel_superadmin():
     if not current_user.is_superadmin: return "Acceso Denegado"
     msg = ""
+    
     if request.method == 'POST':
+        # 1. CREAR USUARIO
         if 'create_user' in request.form:
             u = request.form.get('username'); p = request.form.get('password')
             n = request.form.get('nombre'); r = request.form.get('role')
@@ -191,18 +206,39 @@ def panel_superadmin():
                     cv = CredencialVox(user_id=nu.id, vox_ip="", vox_usuario="", vox_clave=""); db.session.add(cv)
                     db.session.commit()
                 msg = "✅ Usuario creado."
+
+        # 2. VINCULAR CANAL 1 (VOX / SURTIDORES)
         elif 'link_pc' in request.form:
             code = request.form.get('pairing_code', '').strip().upper()
             u = User.query.get(request.form.get('user_id'))
             if u and code:
                 u.device_pairing_code = code; u.status_conexion = "waiting"; db.session.commit()
-                msg = f"🔗 Esperando PC: {code}"
+                msg = f"🔗 Esperando PC VOX: {code}"
+
+        # 3. VINCULAR CANAL 2 (TIRADAS / SOBRES) <-- ¡NUEVO!
+        elif 'link_tiradas' in request.form:
+            code = request.form.get('pairing_code', '').strip().upper()
+            u = User.query.get(request.form.get('user_id'))
+            if u and code:
+                u.code_tiradas = code
+                u.status_tiradas = "waiting"
+                db.session.commit()
+                msg = f"🔗 Esperando PC Tiradas: {code}"
+
+        # 4. REVOCAR ACCESOS (Limpia todo)
         elif 'revoke' in request.form:
             u = User.query.get(request.form.get('user_id'))
-            if u: u.api_token = None; u.status_conexion = "offline"; u.device_pairing_code = None; db.session.commit(); msg = "🚫 Revocado."
+            if u: 
+                # Limpiar Canal 1
+                u.api_token = None; u.status_conexion = "offline"; u.device_pairing_code = None
+                # Limpiar Canal 2
+                u.token_tiradas = None; u.status_tiradas = "offline"; u.code_tiradas = None
+                
+                db.session.commit()
+                msg = "🚫 Acceso revocado (Ambos canales)."
+
     users = User.query.all()
     return render_template('admin_dashboard.html', users=users, msg=msg)
-
 @app.route('/admin/eliminar-estacion/<int:id>', methods=['POST'])
 @login_required
 def eliminar_estacion(id):
@@ -400,8 +436,12 @@ def admin_status_all():
             "status": st, 
             "code": u.device_pairing_code, 
             "token": u.api_token, 
-            "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca"
-        })
+            "last_check": u.last_check.strftime('%d/%m %H:%M') if u.last_check else "Nunca",
+            "status_tiradas": u.status_tiradas,
+            "token_tiradas": u.token_tiradas,
+            "code_tiradas": u.code_tiradas,
+            "last_check_tiradas": u.last_check_tiradas.strftime('%H:%M') if u.last_check_tiradas else '-'
+            })
     return jsonify(data)
 
 # --- MÓDULO VENTAS POR VENDEDOR ---
@@ -672,6 +712,45 @@ def estado_tiradas():
         "comando_pendiente": current_user.comando_pendiente == 'UPLOAD_TIRADAS',
         "ultima_vez": current_user.last_check.strftime("%H:%M:%S") if current_user.last_check else "-"
     })
+# --- API VINCULACIÓN TIRADAS (HANDSHAKE) ---
+@app.route('/api/handshake/tiradas', methods=['POST'])
+def handshake_tiradas():
+    code = request.json.get('code', '').strip().upper()
+    if not code: return jsonify({"status": "waiting"}), 200
+    
+    # Buscamos quién tiene este código generado (asignado por el admin)
+    user = User.query.filter_by(code_tiradas=code).first()
+    
+    if user:
+        # Generamos el token definitivo
+        if not user.token_tiradas: 
+            user.token_tiradas = secrets.token_hex(32)
+        
+        user.code_tiradas = None # Borramos el código, ya no sirve
+        user.status_tiradas = 'online'
+        user.last_check_tiradas = datetime.now()
+        db.session.commit()
+        
+        return jsonify({"status": "linked", "api_token": user.token_tiradas}), 200
+    
+    return jsonify({"status": "waiting"}), 200
+
+# --- API LATIDO TIRADAS (SYNC) ---
+@app.route('/api/tiradas/sync', methods=['POST'])
+def tiradas_sync():
+    token = request.headers.get('X-API-TOKEN')
+    user = User.query.filter_by(token_tiradas=token).first()
+    
+    if not user: return jsonify({"status": "revoked"}), 401
+    
+    user.status_tiradas = 'online'
+    user.last_check_tiradas = datetime.now()
+    
+    cmd = user.comando_tiradas
+    # No borramos el comando aquí, dejamos que la subida lo borre
+    
+    db.session.commit()
+    return jsonify({"status": "ok", "command": cmd}), 200
 
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
