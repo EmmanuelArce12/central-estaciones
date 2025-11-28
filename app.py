@@ -188,19 +188,25 @@ def panel_superadmin():
     
     if request.method == 'POST':
         # 1. CREAR ESTACIÓN (Crea canales por defecto)
+        # 1. CREAR ESTACIÓN (LIMPIO: Sin canales automáticos)
         if 'create_user' in request.form:
             u = request.form.get('username'); p = request.form.get('password')
-            if User.query.filter_by(username=u).first(): msg = "❌ Usuario existe."
+            if User.query.filter_by(username=u).first(): 
+                msg = "❌ El usuario ya existe."
             else:
-                nu = User(username=u, role='estacion'); nu.set_password(p)
-                db.session.add(nu); db.session.commit()
+                # 1. Creamos el usuario
+                nu = User(username=u, role='estacion')
+                nu.set_password(p)
+                db.session.add(nu)
+                db.session.commit() # Confirmamos para tener el ID
+                
+                # 2. Creamos la info del cliente
                 db.session.add(Cliente(nombre_fantasia=request.form.get('nombre'), user_id=nu.id))
-                # Canales Base
-                db.session.add(Channel(user_id=nu.id, tipo='VOX', nombre='VOX Principal'))
-                db.session.add(Channel(user_id=nu.id, tipo='TIRADAS', nombre='Caja Principal'))
+                
+                # YA NO CREAMOS CANALES AUTOMÁTICOS AQUÍ
+                
                 db.session.commit()
-                msg = "✅ Estación creada."
-
+                msg = "✅ Estación creada. Ahora agrega sus canales manualmente."
         # 2. AGREGAR NUEVO CANAL (+)
         elif 'add_channel' in request.form:
             uid = request.form.get('user_id')

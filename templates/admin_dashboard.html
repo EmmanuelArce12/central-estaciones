@@ -17,16 +17,17 @@
         .alert { padding: 12px; background-color: #d4edda; color: #155724; border-radius: 6px; margin-bottom: 20px; border-left: 5px solid #28a745; }
         .alert-error { background-color: #f8d7da; color: #721c24; border-left-color: #dc3545; }
 
-        /* GRID DE TARJETAS SUPERIORES */
-        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        /* GRID DE TARJETAS (NUEVO ORDEN) */
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
-        .card { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
-        .card h3 { margin-top: 0; font-size: 1rem; display: flex; align-items: center; gap: 10px; }
-        
-        /* Colores de Tarjetas */
-        .card-create { border-top: 4px solid #007bff; }
-        .card-link { border-top: 4px solid #6c757d; background-color: #f8f9fa; }
-        .card-add { border-top: 4px solid #28a745; }
+        .card { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); display: flex; flex-direction: column; }
+        .card h3 { margin-top: 0; font-size: 1rem; display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+        .card form { margin-top: auto; }
+
+        /* Colores de Tarjetas por Pasos */
+        .card-step-1 { border-top: 4px solid #007bff; } /* Azul */
+        .card-step-2 { border-top: 4px solid #28a745; } /* Verde */
+        .card-step-3 { border-top: 4px solid #6c757d; background-color: #f8f9fa; } /* Gris */
 
         /* FORMULARIOS */
         .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
@@ -96,8 +97,9 @@
 
     <div class="cards-grid">
         
-        <div class="card card-create">
-            <h3><i class="fa-solid fa-user-plus"></i> Nueva Estación</h3>
+        <div class="card card-step-1">
+            <h3><i class="fa-solid fa-user-plus"></i> 1. Nueva Estación</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Crea el usuario. No agrega canales automáticamente.</p>
             <form method="POST">
                 <input type="hidden" name="create_user" value="1">
                 <div class="form-row">
@@ -105,22 +107,51 @@
                     <div class="form-group"><label>Clave</label><input type="text" name="password" required></div>
                 </div>
                 <div class="form-row">
-                    <div class="form-group"><label>Fantasía</label><input type="text" name="nombre"></div>
+                    <div class="form-group"><label>Fantasía</label><input type="text" name="nombre" required></div>
                     <div class="form-group"><label>Rol</label>
                         <select name="role"><option value="estacion">Estación</option><option value="superadmin">Admin</option></select>
                     </div>
                 </div>
-                <button type="submit" class="btn-primary">Crear</button>
+                <button type="submit" class="btn-primary" style="width:100%">Crear Estación</button>
             </form>
         </div>
 
-        <div class="card card-link">
-            <h3><i class="fa-solid fa-link"></i> Vincular Canal</h3>
-            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Ingresar código mostrado en el Agente (ej: ABC-12).</p>
+        <div class="card card-step-2">
+            <h3><i class="fa-solid fa-plus-circle"></i> 2. Agregar Canal</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Agrega canales (VOX o TIRADAS) a una estación existente.</p>
+            <form method="POST">
+                <input type="hidden" name="add_channel" value="1">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Estación</label>
+                        <select name="user_id" required>
+                            <option value="" disabled selected>Seleccionar...</option>
+                            {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select name="tipo" required>
+                            <option value="VOX">VOX</option>
+                            <option value="TIRADAS">TIRADAS</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Nombre (Ej: Caja 1)</label><input type="text" name="nombre" required placeholder="Nombre descriptivo"></div>
+                </div>
+                <button type="submit" class="btn-success" style="width:100%">Agregar Canal</button>
+            </form>
+        </div>
+
+        <div class="card card-step-3">
+            <h3><i class="fa-solid fa-link"></i> 3. Vincular con Agente</h3>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Usa el código que muestra el programa (Ej: ABC-12).</p>
             <form method="POST">
                 <input type="hidden" name="link_channel" value="1">
-                <label>Canal a vincular</label>
-                <select name="channel_id">
+                <label>Canal disponible</label>
+                <select name="channel_id" required>
+                    <option value="" disabled selected>Seleccionar canal...</option>
                     {% for u in users %}
                         {% if u.role != 'superadmin' %}
                             <optgroup label="{{ u.username }}">
@@ -135,40 +166,22 @@
                 </select>
                 <div class="form-row" style="margin-top:10px;">
                     <div class="form-group" style="flex:2;">
-                        <input type="text" name="pairing_code" placeholder="CÓDIGO (ABC-12)" required>
+                        <input type="text" name="pairing_code" placeholder="CÓDIGO" required>
                     </div>
-                    <button type="submit" class="btn-link-action" style="flex:1;">Link</button>
+                    <button type="submit" class="btn-link-action" style="flex:1;">Vincular</button>
                 </div>
             </form>
         </div>
 
-        <div class="card card-add">
-            <h3><i class="fa-solid fa-plus-circle"></i> Agregar Canal Extra</h3>
-            <p style="font-size:0.8rem; color:#666; margin-bottom:10px;">Crear un canal adicional manualmente.</p>
-            <form method="POST">
-                <input type="hidden" name="add_channel" value="1">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Estación</label>
-                        <select name="user_id">
-                            {% for u in users %}{% if u.role != 'superadmin' %}<option value="{{ u.id }}">{{ u.username }}</option>{% endif %}{% endfor %}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Tipo</label>
-                        <select name="tipo">
-                            <option value="VOX">VOX (Surtidores)</option>
-                            <option value="TIRADAS">TIRADAS (Sobres)</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Nombre (Ej: Caja 2)</label><input type="text" name="nombre" required></div>
-                </div>
-                <button type="submit" class="btn-success">Agregar</button>
-            </form>
-        </div>
+    </div>
 
+    <div style="margin-bottom: 20px; display:flex; justify-content: flex-end;">
+        <form method="POST" onsubmit="return confirm('⚠️ ¿ESTÁS SEGURO?\n\nEsto borrará TODO el historial de tiradas/sobres de la base de datos.\nNo se puede deshacer.');">
+            <input type="hidden" name="clean_database" value="1">
+            <button type="submit" style="background-color: #dc3545; color: white; padding: 8px 15px; font-size:0.85rem; border-radius: 4px;">
+                <i class="fa-solid fa-triangle-exclamation"></i> Vaciar Tabla Tiradas
+            </button>
+        </form>
     </div>
 
     <h2>📡 Estado de Conexiones</h2>
@@ -195,7 +208,7 @@
                 {% set vox_ch = u.channels | selectattr('tipo', 'equalto', 'VOX') | first %}
                 {% set tir_ch = u.channels | selectattr('tipo', 'equalto', 'TIRADAS') | first %}
 
-                <td class="channel-cell" id="ch-container-vox-{{ u.id }}" data-chid="{{ vox_ch.id if vox_ch else '' }}">
+                <td class="channel-cell" id="ch-container-{{ vox_ch.id if vox_ch else 'none' }}" data-chid="{{ vox_ch.id if vox_ch else '' }}">
                     {% if vox_ch %}
                         <div class="channel-header">
                             <span class="badge {{ 'bg-online' if vox_ch.status == 'online' else 'bg-waiting' if vox_ch.status == 'waiting' else 'bg-offline' }}">{{ vox_ch.status|upper }}</span>
@@ -228,7 +241,7 @@
                     {% endif %}
                 </td>
 
-                <td class="channel-cell" id="ch-container-tiradas-{{ u.id }}" data-chid="{{ tir_ch.id if tir_ch else '' }}">
+                <td class="channel-cell" id="ch-container-{{ tir_ch.id if tir_ch else 'none' }}" data-chid="{{ tir_ch.id if tir_ch else '' }}">
                     {% if tir_ch %}
                         <div class="channel-header">
                             <span class="badge {{ 'bg-online' if tir_ch.status == 'online' else 'bg-waiting' if tir_ch.status == 'waiting' else 'bg-offline' }}">{{ tir_ch.status|upper }}</span>
@@ -262,7 +275,7 @@
                 </td>
 
                 <td style="text-align:center;">
-                    <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿ELIMINAR ESTACIÓN?');">
+                    <form action="{{ url_for('eliminar_estacion', id=u.id) }}" method="POST" onsubmit="return confirm('¿ELIMINAR ESTACIÓN DEFINITIVAMENTE?');">
                         <button type="submit" class="btn-trash-station" title="Eliminar Estación"><i class="fa-solid fa-trash"></i></button>
                     </form>
                 </td>
@@ -282,7 +295,7 @@
         try { document.execCommand('copy'); el.style.backgroundColor = "#d4edda"; setTimeout(() => el.style.backgroundColor = "transparent", 300); } catch (err) {}
     }
 
-    // ACTUALIZACIÓN DE ESTADOS (SOPORTA FORMATO NUEVO)
+    // --- ACTUALIZACIÓN DINÁMICA DE ESTADOS ---
     function updateStatus() {
         const ind = document.getElementById('loading-indicator');
         ind.style.opacity = '1';
@@ -292,8 +305,9 @@
             .then(data => {
                 setTimeout(() => ind.style.opacity = '0', 500);
                 
-                // DATA ES UNA LISTA DE USUARIOS CON SU ARRAY DE CANALES
+                // Recorremos todos los usuarios
                 data.forEach(u => {
+                    // Recorremos sus canales
                     u.channels.forEach(ch => {
                         updateChannelUI(ch);
                     });
@@ -303,41 +317,42 @@
     }
 
     function updateChannelUI(ch) {
-        // Buscamos el input del token usando el ID único del canal
+        // 1. Buscamos la celda usando el ID del canal (data-chid)
+        const td = document.querySelector(`td[data-chid="${ch.id}"]`);
+        if (!td) return; // Si el canal no está en la tabla (ej. es el segundo canal de vox y la tabla muestra solo el primero), lo ignoramos.
+
+        // 2. Actualizar Badge y Hora
+        const badge = td.querySelector('.badge');
+        if (badge) {
+            let cls = 'bg-offline';
+            if(ch.status === 'online') cls = 'bg-online';
+            if(ch.status === 'waiting') cls = 'bg-waiting';
+            badge.className = `badge ${cls}`;
+            badge.innerText = ch.status.toUpperCase();
+        }
+        
+        const time = td.querySelector('.last-seen');
+        if (time) time.innerText = ch.last_check;
+
+        // 3. Actualizar Token si aparece de repente (Vinculación exitosa)
         const tokenInput = document.getElementById(`token-${ch.id}`);
         
-        // Si hay token nuevo y el input existe, actualizamos
+        // Si YA tenemos input y el token cambió (raro, pero posible)
         if (tokenInput && ch.token && tokenInput.value !== ch.token) {
             tokenInput.value = ch.token;
         }
 
-        // Si cambió de NO vinculado a Vinculado, recargamos (más fácil que manipular todo el DOM complejo)
-        // Esto pasa si antes no había input y ahora llega un token
+        // Si NO tenemos input (estaba esperando) y ahora SÍ hay token -> Recargar para mostrar botones
+        // (Detectamos esto si hay badge 'waiting' pero llega token)
         if (!tokenInput && ch.token) {
-             // Opcional: location.reload(); 
+             // Opcional: location.reload() para que pinte el HTML completo del token;
+             // Por simplicidad, solo recargamos si vemos un cambio drástico de estado
+             // window.location.reload(); 
         }
-
-        // Actualizar badges
-        // Necesitamos encontrar el contenedor padre del canal.
-        // Como no tenemos el ID del user directo en 'ch' en todos los casos, buscamos por el input
-        // O buscamos por el atributo data-chid que pusimos en el TD
-        const td = document.querySelector(`td[data-chid="${ch.id}"]`);
-        if (td) {
-            const badge = td.querySelector('.badge');
-            if (badge) {
-                let cls = 'bg-offline';
-                if(ch.status === 'online') cls = 'bg-online';
-                if(ch.status === 'waiting') cls = 'bg-waiting';
-                badge.className = `badge ${cls}`;
-                badge.innerText = ch.status.toUpperCase();
-            }
-            const time = td.querySelector('.last-seen');
-            if (time) time.innerText = ch.last_check;
-            
-            // Si el código cambió
-            const codeSpan = td.querySelector('.pairing-code');
-            if (codeSpan && ch.code) codeSpan.innerText = ch.code;
-        }
+        
+        // 4. Actualizar Código si cambió
+        const codeSpan = td.querySelector('.pairing-code');
+        if (codeSpan && ch.code) codeSpan.innerText = ch.code;
     }
 
     setInterval(updateStatus, 3000);
