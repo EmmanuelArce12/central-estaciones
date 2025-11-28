@@ -453,27 +453,60 @@ def estado_tiradas():
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
+    # 1. Buscamos el canal VOX del usuario actual
     ch = next((c for c in current_user.channels if c.tipo == 'VOX'), None)
-    if not ch: # Auto-fix si no tiene canal
+    
+    # Si por alguna razón no existe, lo creamos vacío
+    if not ch:
         ch = Channel(user_id=current_user.id, tipo='VOX', nombre='VOX Principal')
-        db.session.add(ch); db.session.commit()
-
-    import json
-    data = json.loads(ch.config_data) if ch.config_data else {}
-    
-    if request.method == 'POST':
-        new_data = {'ip': request.form.get('ip'), 'u': request.form.get('u'), 'p': request.form.get('p')}
-        ch.config_data = json.dumps(new_data)
-        ch.comando = 'EXTRACT'
+        db.session.add(ch)
         db.session.commit()
-        
-    class DummyCred:
-        vox_ip = data.get('ip', '')
-        vox_usuario = data.get('u', '')
-        vox_clave = data.get('p', '')
-    
-    return render_template('configurar_vox.html', cred=DummyCred(), user=current_user)
 
+    msg = ""
+    import json
+
+    # --- GUARDAR (POST) ---
+    if request.method == 'POST':
+        try:
+            # Creamos el diccionario con los datos del formulario
+            nuevos_datos = {
+                'ip': request.form.get('ip'),
+                'u': request.form.get('u'),
+                'p': request.form.get('p')
+            }
+            
+            # Guardamos ese diccionario como TEXTO JSON en la base de datos
+            ch.config_data = json.dumps(nuevos_datos)
+            
+            # Le avisamos al agente que hay cambios
+            ch.comando = 'EXTRACT' 
+            db.session.commit()
+            
+            msg = "✅ Configuración guardada."
+        except Exception as e:
+            db.session.rollback()
+            msg = f"❌ Error guardando: {e}"
+
+    # --- MOSTRAR (GET) ---
+    # Aquí es donde leemos el JSON que me mostraste en la foto
+    datos_guardados = {}
+    if ch.config_data:
+        try: 
+            datos_guardados = json.loads(ch.config_data)
+        except: 
+            pass # Si el JSON está corrupto, usamos vacío
+
+    # Creamos un objeto temporal para engañar al HTML viejo y que muestre los datos
+    class CredsFake:
+        vox_ip = datos_guardados.get('ip', '')
+        vox_usuario = datos_guardados.get('u', '')
+        vox_clave = datos_guardados.get('p', '')
+
+    # Verificamos si la PC está conectada
+    is_online = (ch.status == 'online')
+    last_seen = ch.last_check.strftime("%H:%M:%S") if ch.last_check else "Nunca"
+    
+    return render_template('configurar_vox.html', cred=CredsFake(), msg=msg, is_online=is_online, last_seen=last_seen, user=current_user)
 # --- VENTAS VENDEDOR Y REPORTES (Siguen igual, pero verificadas) ---
 @app.route('/api/resumen-dia/<string:fecha>')
 @login_required
