@@ -212,13 +212,54 @@
 
 <script>
     // Función para copiar al portapapeles
+    // --- FUNCIÓN DE COPIAR ROBUSTA (Funciona en HTTP y HTTPS) ---
     function copiarToken(token) {
-        navigator.clipboard.writeText(token).then(() => {
-            // Feedback visual simple
-            alert("✅ ¡Token copiado!\nPégalo en el instalador de Agente Tiradas.");
-        }).catch(err => {
-            console.error('Error al copiar: ', err);
-        });
+        if (!token) {
+            alert("❌ Error: No hay token para copiar.");
+            return;
+        }
+
+        // Intento 1: API Moderna (Solo HTTPS)
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(token).then(() => {
+                alert("✅ Token copiado al portapapeles:\n" + token);
+            }).catch(err => {
+                console.error('Error API Clipboard:', err);
+                copiarManualmente(token); // Si falla, vamos al plan B
+            });
+        } else {
+            // Intento 2: Método Fallback (Funciona en HTTP)
+            copiarManualmente(token);
+        }
+    }
+
+    function copiarManualmente(texto) {
+        // Crea un campo de texto invisible temporalmente
+        const textArea = document.createElement("textarea");
+        textArea.value = texto;
+        
+        // Asegura que no se vea en pantalla
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        
+        textArea.focus();
+        textArea.select();
+        
+        try {
+            const exitoso = document.execCommand('copy');
+            if (exitoso) {
+                alert("✅ Token copiado (Modo seguro):\n" + texto);
+            } else {
+                alert("⚠️ No se pudo copiar automáticamente.\nToken: " + texto);
+            }
+        } catch (err) {
+            console.error('Error Fallback:', err);
+            prompt("Copia el token manualmente:", texto);
+        }
+        
+        document.body.removeChild(textArea);
     }
 
     // Polling para actualizar tabla sin recargar
