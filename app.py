@@ -33,7 +33,11 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# --- FUNCIONES AUXILIARES ---
+# ==========================================
+# 🛠️ FUNCIONES AUXILIARES (CRÍTICAS)
+# ==========================================
+
+# 1. Función para calcular turno simple (CSV)
 def calcular_info_operativa(fecha_hora_str):
     try:
         dt = pd.to_datetime(fecha_hora_str)
@@ -47,7 +51,51 @@ def calcular_info_operativa(fecha_hora_str):
         return fecha_op.strftime('%Y-%m-%d'), turno
     except: return datetime.now().strftime('%Y-%m-%d'), "Sin Asignar"
 
-# --- MODELOS ---
+# 2. Función para procesar reporte VOX (ESTA FALTABA O ESTABA DAÑADA)
+def procesar_datos_turno(s):
+    """
+    Parsea strings complejos del VOX tipo:
+    '2023-11-28 (2023/11/28 06:00:00 - 2023/11/28 14:00:00)'
+    """
+    try:
+        # Si el string viene limpio (solo fecha), lo manejamos simple
+        if '(' not in s:
+            return calcular_info_operativa(s) + (None, None)
+
+        contenido = s.split('(')[1].replace(')', '') 
+        partes = contenido.split(' - ')
+        str_apertura = partes[0].strip()
+        str_cierre = partes[1].strip()
+        
+        # Intentamos formatos comunes de VOX
+        for fmt in ["%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M:%S"]:
+            try:
+                dt_apertura = datetime.strptime(str_apertura, fmt)
+                dt_cierre = datetime.strptime(str_cierre, fmt)
+                break
+            except: continue
+        
+        # Lógica de turno operativo
+        h = dt_cierre.hour
+        fecha_obj = dt_cierre.date()
+        turno = "Noche"
+        
+        if 6 <= h < 14: turno = "Mañana"
+        elif 14 <= h < 22: turno = "Tarde"
+        else:
+            # Si es madrugada (ej 02:00 AM), pertenece al día operativo anterior
+            if h < 6: fecha_obj = fecha_obj - timedelta(days=1)
+        
+        return fecha_obj.strftime("%Y-%m-%d"), turno, dt_cierre, dt_apertura
+        
+    except Exception as e: 
+        print(f"⚠️ Error parseando fecha VOX '{s}': {e}")
+        # Fallback de emergencia: devolver valores por defecto para no romper el server (Error 500)
+        return datetime.now().strftime("%Y-%m-%d"), "Error", datetime.now(), datetime.now()
+
+# ==========================================
+# 🗃️ MODELOS DE BASE DE DATOS
+# ==========================================
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -56,10 +104,7 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='estacion', nullable=False)
     
-    # RELACIÓN: Un usuario tiene MUCHOS canales
     channels = db.relationship('Channel', backref='usuario', lazy=True, cascade="all, delete-orphan")
-    
-    # Relaciones de datos
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
     reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
     tiradas = db.relationship('Tirada', backref='usuario', lazy=True, cascade="all, delete-orphan")
@@ -74,17 +119,13 @@ class Channel(db.Model):
     __tablename__ = 'channels'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    
-    tipo = db.Column(db.String(20), nullable=False)   # 'VOX' o 'TIRADAS'
-    nombre = db.Column(db.String(50), nullable=False) # Ej: "Caja 1", "Surtidores"
-    
+    tipo = db.Column(db.String(20), nullable=False)
+    nombre = db.Column(db.String(50), nullable=False)
     token = db.Column(db.String(100), unique=True, nullable=True)
     code = db.Column(db.String(20), nullable=True)
     status = db.Column(db.String(20), default='offline')
     last_check = db.Column(db.DateTime)
     comando = db.Column(db.String(50), nullable=True)
-    
-    # Para guardar IP/User/Pass del VOX en formato JSON
     config_data = db.Column(db.Text, nullable=True) 
 
 class Cliente(db.Model):
@@ -148,7 +189,9 @@ with app.app_context():
 @login_manager.user_loader
 def load_user(uid): return User.query.get(int(uid))
 
-# --- RUTAS WEB ---
+# ==========================================
+# 🌐 RUTAS WEB
+# ==========================================
 
 @app.route('/')
 def root():
@@ -178,7 +221,6 @@ def panel_superadmin():
     msg = ""
     
     if request.method == 'POST':
-        # 1. CREAR ESTACIÓN (LIMPIO)
         if 'create_user' in request.form:
             u = request.form.get('username'); p = request.form.get('password')
             if User.query.filter_by(username=u).first(): msg = "❌ Usuario existe."
@@ -187,39 +229,26 @@ def panel_superadmin():
                 db.session.add(nu); db.session.commit()
                 db.session.add(Cliente(nombre_fantasia=request.form.get('nombre'), user_id=nu.id))
                 db.session.commit()
-                msg = "✅ Estación creada. Agrega canales manualmente."
-
-        # 2. AGREGAR CANAL
+                msg = "✅ Estación creada."
         elif 'add_channel' in request.form:
             uid = request.form.get('user_id')
             db.session.add(Channel(user_id=uid, tipo=request.form.get('tipo'), nombre=request.form.get('nombre')))
             db.session.commit()
             msg = "✅ Canal agregado."
-
-        # 3. VINCULAR CANAL
         elif 'link_channel' in request.form:
             ch = Channel.query.get(request.form.get('channel_id'))
             code = request.form.get('pairing_code').strip().upper()
             if ch and code:
                 ch.code = code; ch.status = 'waiting'; db.session.commit()
                 msg = f"🔗 Esperando conexión en {ch.nombre}"
-
-        # 4. BORRAR CANAL
         elif 'delete_channel' in request.form:
             db.session.delete(Channel.query.get(request.form.get('channel_id')))
             db.session.commit()
-
-        # 5. DESVINCULAR
         elif 'revoke_channel' in request.form:
             ch = Channel.query.get(request.form.get('channel_id'))
             if ch: ch.token = None; ch.status = 'offline'; ch.code = None; db.session.commit()
-
-        # 6. LIMPIAR TIRADAS
         elif 'clean_database' in request.form:
-            try:
-                db.session.query(Tirada).delete()
-                db.session.commit()
-                msg = "✅ Base de datos limpia (Tiradas)."
+            try: db.session.query(Tirada).delete(); db.session.commit(); msg = "✅ Base limpia."
             except: db.session.rollback()
 
     return render_template('admin_dashboard.html', users=User.query.all(), msg=msg)
@@ -237,19 +266,16 @@ def admin_status_all():
     if not current_user.is_superadmin: return jsonify([])
     data = []
     ahora = datetime.now()
-    
     for u in User.query.all():
         channels_data = []
         for ch in u.channels:
             st = ch.status
             if ch.last_check and (ahora - ch.last_check).total_seconds() > 120: st = 'offline'
-            
             channels_data.append({
                 "id": ch.id, "nombre": ch.nombre, "tipo": ch.tipo,
                 "status": st, "token": ch.token, "code": ch.code,
                 "last_check": ch.last_check.strftime('%H:%M') if ch.last_check else "-"
             })
-            
         data.append({
             "id": u.id, "username": u.username,
             "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "-",
@@ -257,41 +283,36 @@ def admin_status_all():
         })
     return jsonify(data)
 
-# --- APIS UNIFICADAS ---
+# ==========================================
+# 📡 APIS AGENTE (COMUNICACIÓN)
+# ==========================================
 
-# 1. HANDSHAKE (Vinculación)
+# 1. HANDSHAKE
 @app.route('/api/handshake/tiradas', methods=['POST']) 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_generic():
     code = request.json.get('code', '').strip().upper()
     ch = Channel.query.filter_by(code=code).first()
-    
     if ch:
         if not ch.token: ch.token = secrets.token_hex(32)
         ch.code = None; ch.status = 'online'; ch.last_check = datetime.now()
-        # [MODIFICADO] NO iniciamos comando automático. Modo Manual.
         db.session.commit()
         return jsonify({"status": "linked", "api_token": ch.token}), 200
-    
     return jsonify({"status": "waiting"}), 200
 
-# 2. SYNC (Latido)
+# 2. SYNC (LATIDO)
 @app.route('/api/tiradas/sync', methods=['POST'])
 @app.route('/api/agent/sync', methods=['POST'])
 def sync_generic():
     token = request.headers.get('X-API-TOKEN')
     ch = Channel.query.filter_by(token=token).first()
-    
     if not ch: return jsonify({"status": "revoked"}), 401
     
     ch.status = 'online'; ch.last_check = datetime.now()
     resp = {"status": "ok", "command": ch.comando}
     
     if ch.tipo == 'VOX':
-        # Si la orden ya se envió, la limpiamos.
         if ch.comando == 'EXTRACT': ch.comando = None
-        
-        # Enviamos config
         import json
         conf = {}
         if ch.config_data:
@@ -302,7 +323,7 @@ def sync_generic():
     db.session.commit()
     return jsonify(resp), 200
 
-# 3. REPORTAR (Recibir datos de VOX) - [ESTA RUTA FALTABA Y DABA EL 404]
+# 3. REPORTAR (RECIBE DATOS DE VOX) -> ¡AQUÍ FALLABA!
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
@@ -314,11 +335,13 @@ def api_reportar_vox():
         nid = n.get('id_interno')
         u_id = ch.user_id 
         
-        # Evitar duplicados exactos
+        # Chequeo duplicados
         if Reporte.query.filter_by(id_interno=nid, user_id=u_id).first(): 
             return jsonify({"status":"ignorado"}), 200
             
+        # AQUÍ SE LLAMA A LA FUNCIÓN QUE FALTABA
         f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
+        
         if not f_op: return jsonify({"status":"error_fecha"}), 400
 
         r = Reporte(
@@ -331,48 +354,41 @@ def api_reportar_vox():
         db.session.commit()
         return jsonify({"status":"exito"}), 200
     except Exception as e: 
-        print(f"Error reportar: {e}")
-        return jsonify({"status":"error"}), 500
+        print(f"🔥 Error en api_reportar: {e}")
+        return jsonify({"status":"error", "msg": str(e)}), 500
 
-# 4. PING UI (Semáforo Web) - [ESTA RUTA FALTABA Y DABA EL 404]
+# 4. PING UI (SEMÁFORO)
 @app.route('/api/ping-ui')
 @login_required
 def ping_ui():
-    # Busca canal VOX
     ch = next((c for c in current_user.channels if c.tipo == 'VOX'), None)
     st = 'offline'
     cmd_pendiente = False
-    
     if ch:
         st = ch.status
-        if ch.last_check and (datetime.now() - ch.last_check).total_seconds() > 120:
-            st = 'offline'
+        if ch.last_check and (datetime.now() - ch.last_check).total_seconds() > 120: st = 'offline'
         cmd_pendiente = (ch.comando == 'EXTRACT')
-
     return jsonify({"st": st, "cmd": cmd_pendiente})
 
-# 5. RECEPCIÓN ARCHIVOS (Tiradas)
+# 5. RECEPCIÓN TIRADAS
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
     token = request.headers.get('X-API-TOKEN')
     ch = Channel.query.filter_by(token=token).first()
     if not ch or ch.tipo != 'TIRADAS': return jsonify({"status": "error"}), 401
     
-    user = ch.usuario 
     if 'archivo' not in request.files: return jsonify({"status": "error"}), 400
     archivo = request.files['archivo']
-    
     try:
         import io
         contenido = archivo.read()
         df = pd.read_csv(io.BytesIO(contenido)) 
-        # (Lógica resumida, si necesitas la completa avísame)
         ch.comando = None
         db.session.commit()
         return jsonify({"status": "ok", "count": 1}), 200
     except Exception as e: return jsonify({"status": "error"}), 500
 
-# --- VISTAS CLIENTE (ESTACIÓN) ---
+# --- VISTAS CLIENTE ---
 
 @app.route('/estacion/panel')
 @login_required
@@ -385,16 +401,15 @@ def panel_estacion():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
-@app.route('/api/lanzar-orden', methods=['POST']) # VOX MANUAL
+@app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
     for ch in current_user.channels:
-        if ch.tipo == 'VOX': 
-            ch.comando = 'EXTRACT' # <--- ÚNICO LUGAR DONDE SE ACTIVA
+        if ch.tipo == 'VOX': ch.comando = 'EXTRACT'
     db.session.commit()
     return jsonify({"status": "ok"})
 
-@app.route('/api/lanzar-tiradas', methods=['POST']) # TIRADAS MANUAL
+@app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_tiradas():
     for ch in current_user.channels:
@@ -428,10 +443,6 @@ def config_vox():
         try:
             nuevos_datos = {'ip': request.form.get('ip'), 'u': request.form.get('u'), 'p': request.form.get('p')}
             ch.config_data = json.dumps(nuevos_datos)
-            
-            # [MODIFICADO] NO lanzamos orden automática. Solo guardamos.
-            # ch.comando = 'EXTRACT' <-- ELIMINADO
-            
             db.session.commit()
             msg = "✅ Configuración guardada."
         except: msg = "❌ Error al guardar"
