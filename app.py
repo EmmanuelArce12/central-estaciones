@@ -228,20 +228,28 @@ def panel_superadmin():
                 db.session.commit()
                 msg = f"🔗 Esperando PC Tiradas: {code}"
 
-        # 4. REVOCAR TODO
-        elif 'revoke' in request.form:
+        # 4. DESVINCULAR SOLO VOX (Canal 1) <-- NUEVO
+        elif 'revoke_vox' in request.form:
             u = User.query.get(request.form.get('user_id'))
             if u: 
-                # Canal 1
-                u.api_token = None; u.status_conexion = "offline"; u.device_pairing_code = None
-                # Canal 2
-                u.token_tiradas = None; u.status_tiradas = "offline"; u.code_tiradas = None
+                u.api_token = None
+                u.status_conexion = "offline"
+                u.device_pairing_code = None
                 db.session.commit()
-                msg = "🚫 Acceso revocado (Ambos canales)."
+                msg = "🚫 PC VOX desvinculada."
+
+        # 5. DESVINCULAR SOLO TIRADAS (Canal 2) <-- NUEVO
+        elif 'revoke_tiradas' in request.form:
+            u = User.query.get(request.form.get('user_id'))
+            if u:
+                u.token_tiradas = None
+                u.status_tiradas = "offline"
+                u.code_tiradas = None
+                db.session.commit()
+                msg = "🚫 PC Tiradas desvinculada."
 
     users = User.query.all()
     return render_template('admin_dashboard.html', users=users, msg=msg)
-
 @app.route('/admin/eliminar-estacion/<int:id>', methods=['POST'])
 @login_required
 def eliminar_estacion(id):
