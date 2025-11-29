@@ -588,12 +588,36 @@ def subir_ventas_vendedor():
 
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
-def ver_tiradas():
+def ver_tiradas_web(): 
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    
+    # 1. Recuperar tiradas de la DB
     tiradas = Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
+    
+    # 2. Calcular totales
     total_plata = sum([t.monto for t in tiradas])
-    return render_template('tiradas.html', tiradas=tiradas, fecha=fecha, t_plata=total_plata, t_sobres=len(tiradas))
+    
+    # 3. [NUEVO] Agrupar por turno para que el HTML no falle
+    tiradas_por_turno = { "Mañana": [], "Tarde": [], "Noche": [] }
+    
+    for t in tiradas:
+        # Normalizamos el nombre del turno (ej: "mañana" -> "Mañana")
+        # Si el turno viene vacío o es raro, lo mandamos a "Noche" por defecto
+        if t.turno:
+            k = t.turno.capitalize()
+            if k in tiradas_por_turno:
+                tiradas_por_turno[k].append(t)
+            else:
+                tiradas_por_turno["Noche"].append(t)
+        else:
+            tiradas_por_turno["Noche"].append(t)
 
-
+    # 4. Enviar todo a la plantilla
+    return render_template('tiradas.html', 
+                           tiradas=tiradas, 
+                           tiradas_por_turno=tiradas_por_turno, # <--- ESTO ES LO QUE FALTABA
+                           fecha=fecha, 
+                           t_plata=total_plata, 
+                           t_sobres=len(tiradas))
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
