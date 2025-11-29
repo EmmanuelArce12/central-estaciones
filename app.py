@@ -284,32 +284,43 @@ def handshake_generic():
     return jsonify({"status": "waiting"}), 200
 
 @app.route('/api/tiradas/sync', methods=['POST'])
-# B. MODIFICAR: SYNC (Le pasa la config al agente Tiradas también)
 @app.route('/api/agent/sync', methods=['POST'])
 def sync_generic():
     token = request.headers.get('X-API-TOKEN')
     ch = Channel.query.filter_by(token=token).first()
+    
     if not ch: return jsonify({"status": "revoked"}), 401
     
-    ch.status = 'online'; ch.last_check = datetime.now()
+    ch.status = 'online'
+    ch.last_check = datetime.now()
+    
     resp = {"status": "ok", "command": ch.comando}
     
-    # Enviamos configuración (IP para VOX, o Filtro Fecha para TIRADAS)
+    # Recuperamos la configuración (donde guardamos la fecha) para enviarla
     import json
     conf = {}
     if ch.config_data:
         try: conf = json.loads(ch.config_data)
         except: pass
-        
-    resp['config'] = conf # Enviamos todo el JSON de config
     
-    # IMPORTANTE: Si es Tiradas, NO borramos el comando aquí. 
-    # El agente lo borrará cuando termine de subir todos los archivos.
+    resp['config'] = conf # Aquí viaja 'filtro_fecha' hacia el agente
+    
+    # Lógica de limpieza automática solo para VOX (Tiradas espera a fin_tarea)
     if ch.tipo == 'VOX' and ch.comando == 'EXTRACT': 
         ch.comando = None
 
     db.session.commit()
     return jsonify(resp), 200
+
+# 3. AGREGAR NUEVA RUTA: FIN TAREA (Para que el agente avise cuando terminó)
+@app.route('/api/fin-tarea', methods=['POST'])
+def fin_tarea_tiradas():
+    token = request.headers.get('X-API-TOKEN')
+    ch = Channel.query.filter_by(token=token).first()
+    if ch:
+        ch.comando = None # Apagamos la orden/botón en la web
+        db.session.commit()
+    return jsonify({"status": "ok"})
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
@@ -461,29 +472,30 @@ def lanzar_vox():
 
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 # A. MODIFICAR: LANZAR TIRADAS (Ahora recibe fecha de filtro)
+# 1. MODIFICAR: LANZAR ORDEN (Ahora guarda la fecha que eliges en el calendario)
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_tiradas():
-    # Recibimos la fecha de inicio desde el frontend (JSON)
+    # Recibimos la fecha del frontend (si no envían nada, usa 2025-01-01)
     data = request.json or {}
-    fecha_filtro = data.get('fecha_inicio', '2025-01-01') # Default 2025
+    fecha_filtro = data.get('fecha_inicio', '2025-01-01')
 
     for ch in current_user.channels:
         if ch.tipo == 'TIRADAS': 
             ch.comando = 'UPLOAD_TIRADAS'
-            # Guardamos la fecha de filtro en la config del canal para que el agente la lea
+            
+            # Guardamos la fecha en la configuración del canal
             import json
-            current_conf = {}
+            conf = {}
             if ch.config_data:
-                try: current_conf = json.loads(ch.config_data)
+                try: conf = json.loads(ch.config_data)
                 except: pass
             
-            current_conf['filtro_fecha'] = fecha_filtro
-            ch.config_data = json.dumps(current_conf)
+            conf['filtro_fecha'] = fecha_filtro
+            ch.config_data = json.dumps(conf)
 
     db.session.commit()
-    return jsonify({"status": "ok"})
-@app.route('/api/estado-tiradas')
+    return jsonify({"status": "ok"})@app.route('/api/estado-tiradas')
 @login_required
 def estado_tiradas():
     online = False

@@ -18,11 +18,11 @@
         input[type="checkbox"] { transform: scale(1.2); cursor: pointer; }
 
         /* TARJETAS CONTROL */
-        .control-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .control-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         .card-remote { border-left: 5px solid #e67e22; }
         
-        /* ESTILOS DEL PANEL DE CARGA */
+        /* --- NUEVO: ESTILOS DEL PANEL DE CARGA --- */
         .load-panel { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
         .load-row { display: flex; gap: 10px; align-items: center; }
         .date-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-family: inherit; }
@@ -94,7 +94,7 @@
     </div>
 
     <div class="control-bar">
-        <!-- TARJETA AGENTE REMOTO -->
+        <!-- TARJETA AGENTE REMOTO (MODIFICADA) -->
         <div class="card card-remote">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <label style="font-weight:bold; color:#555;">📡 Estado Agente:</label>
@@ -106,7 +106,9 @@
             <div class="load-panel">
                 <label style="font-size:0.85rem; font-weight:600; color:#555; display:block; margin-bottom:5px;">📥 Traer movimientos desde:</label>
                 <div class="load-row">
+                    <!-- Input de Fecha -->
                     <input type="date" id="fechaInicioCarga" class="date-input" value="2025-01-01">
+                    <!-- Botón de Acción -->
                     <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()" disabled>INICIAR CARGA</button>
                 </div>
                 <div id="msgEstado" style="text-align:center; font-size:0.8rem; color:#e67e22; margin-top:8px; display:none;"></div>
@@ -234,14 +236,15 @@
                     badge.className = 'status-badge st-online'; 
                     badge.innerHTML = '<span class="dot dot-green"></span> CONECTADO';
                     
+                    // Si hay comando pendiente (está trabajando), bloqueamos
                     if (data.comando_pendiente) {
                         btn.disabled = true;
                         btn.style.backgroundColor = "#ccc";
                         btn.innerText = "🔄 PROCESANDO...";
                         msg.style.display = 'block';
                         msg.innerText = "El agente está subiendo archivos...";
-                        isProcessing = true; // Bloqueo local
-                        waitForCompletion();
+                        isProcessing = true; // Bloqueamos la interfaz local
+                        waitForCompletion(); // Empezamos a vigilar
                     } else {
                         btn.disabled = false;
                         btn.innerText = "INICIAR CARGA";
@@ -259,6 +262,7 @@
 
         function solicitarRemoto() {
             const fechaInicio = document.getElementById('fechaInicioCarga').value;
+            
             if(!confirm(`¿Iniciar carga masiva desde el ${fechaInicio}?\n\nEl agente buscará todos los archivos posteriores a esa fecha.`)) return;
 
             isProcessing = true;
@@ -270,6 +274,7 @@
             msg.style.display = 'block';
             msg.innerText = "Contactando agente...";
 
+            // Enviamos fecha al backend
             fetch('/api/lanzar-tiradas', {
                 method:'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -289,6 +294,7 @@
         function waitForCompletion() {
             const i = setInterval(() => {
                 fetch('/api/estado-tiradas').then(r=>r.json()).then(d => {
+                    // Si el comando se limpió, significa que el agente terminó
                     if (!d.comando_pendiente) {
                         clearInterval(i);
                         document.getElementById('msgEstado').innerText = "✅ ¡Carga completada!";
