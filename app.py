@@ -469,7 +469,7 @@ def estado_tiradas():
     last = "-"
     for ch in current_user.channels:
         if ch.tipo == 'TIRADAS':
-            if ch.last_check and (datetime.now() - ch.last_check).total_seconds() < 120:
+            if ch.last_check and (datetime.now() - ch.last_check).total_seconds() < 600:
                 online = True
                 last = ch.last_check.strftime("%H:%M:%S")
     return jsonify({"online": online, "ultima_vez": last})
@@ -624,79 +624,55 @@ def subir_ventas_vendedor():
 def ver_tiradas_web(): 
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     
-    # 1. OBTENER HORARIOS REALES DE LA VOX (Reportes)
-    # Buscamos qué horarios reportó la VOX para Mañana, Tarde y Noche en esa fecha
+    # 1. HORARIOS VOX
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
-    
-    # Estructura para guardar los límites reales de cada turno
-    horarios_vox = {
-        "Mañana": {"inicio": None, "fin": None},
-        "Tarde": {"inicio": None, "fin": None},
-        "Noche": {"inicio": None, "fin": None}
-    }
+    horarios_vox = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
     
     for r in reportes:
         if r.turno in horarios_vox:
-            # Capturamos hora de apertura
             if r.hora_apertura:
                 t = r.hora_apertura.time()
-                # Si hay varios reportes (raro), nos quedamos con el inicio más temprano
-                if horarios_vox[r.turno]["inicio"] is None or t < horarios_vox[r.turno]["inicio"]:
-                    horarios_vox[r.turno]["inicio"] = t
-            
-            # Capturamos hora de cierre
+                if horarios_vox[r.turno]["inicio"] is None or t < horarios_vox[r.turno]["inicio"]: horarios_vox[r.turno]["inicio"] = t
             if r.hora_cierre:
                 t = r.hora_cierre.time()
-                # Nos quedamos con el cierre más tardío
-                if horarios_vox[r.turno]["fin"] is None or t > horarios_vox[r.turno]["fin"]:
-                    horarios_vox[r.turno]["fin"] = t
+                if horarios_vox[r.turno]["fin"] is None or t > horarios_vox[r.turno]["fin"]: horarios_vox[r.turno]["fin"] = t
 
-    # 2. TRAER TODAS LAS TIRADAS (Sin filtrar aún)
+    # 2. TRAER TIRADAS
     tiradas = Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     total_plata = sum([t.monto for t in tiradas])
     
-    # 3. CLASIFICAR TIRADAS INTELIGENTEMENTE
-    tiradas_por_turno = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
+    # 3. CLASIFICAR Y AGRUPAR POR VENDEDOR
+    # Estructura: { "Mañana": { "Juan": {"total": 100, "items": [...]}, ... }, ... }
+    datos_agrupados = { "Mañana": {}, "Tarde": {}, "Noche": {}, "Sin Asignar": {} }
     
     for t in tiradas:
-        asignado = False
+        turno_asignado = "Noche" # Default
         try:
-            # Convertimos la hora de la tirada (string) a objeto time
             h_tirada = datetime.strptime(t.hora, "%H:%M:%S").time()
-            
-            # Comparamos contra los rangos reales de la VOX
-            for nombre_turno, rango in horarios_vox.items():
-                ini = rango["inicio"]
-                fin = rango["fin"]
-                
+            asignado = False
+            for nombre, rango in horarios_vox.items():
+                ini, fin = rango["inicio"], rango["fin"]
                 if ini and fin:
-                    # Caso A: Rango normal en el mismo día (ej: 06:00 a 14:00)
-                    if ini < fin:
-                        if ini <= h_tirada <= fin:
-                            tiradas_por_turno[nombre_turno].append(t)
-                            asignado = True
-                            break
-                    # Caso B: Rango que cruza la medianoche (ej: 22:00 a 06:00)
-                    else:
-                        if h_tirada >= ini or h_tirada <= fin:
-                            tiradas_por_turno[nombre_turno].append(t)
-                            asignado = True
-                            break
+                    if (ini < fin and ini <= h_tirada <= fin) or (ini > fin and (h_tirada >= ini or h_tirada <= fin)):
+                        turno_asignado = nombre; asignado = True; break
             
-            # 4. FALLBACK: Si no hay reporte VOX o la hora no calza, usamos horario fijo
             if not asignado:
                 hr = h_tirada.hour
-                if 6 <= hr < 14: tiradas_por_turno["Mañana"].append(t)
-                elif 14 <= hr < 22: tiradas_por_turno["Tarde"].append(t)
-                else: tiradas_por_turno["Noche"].append(t)
-                
-        except:
-            # Si la hora es inválida o falla algo, lo mandamos a Noche para no perder el dato
-            tiradas_por_turno["Noche"].append(t)
+                if 6 <= hr < 14: turno_asignado = "Mañana"
+                elif 14 <= hr < 22: turno_asignado = "Tarde"
+        except: pass
+
+        # Agrupar por Vendedor dentro del Turno
+        vend = t.vendedor
+        if vend not in datos_agrupados[turno_asignado]:
+            datos_agrupados[turno_asignado][vend] = { "total": 0, "count": 0, "items": [] }
+        
+        datos_agrupados[turno_asignado][vend]["items"].append(t)
+        datos_agrupados[turno_asignado][vend]["total"] += t.monto
+        datos_agrupados[turno_asignado][vend]["count"] += 1
 
     return render_template('tiradas.html', 
-                           tiradas=tiradas, 
-                           tiradas_por_turno=tiradas_por_turno, 
+                           datos=datos_agrupados, # Nueva estructura
                            fecha=fecha, 
                            t_plata=total_plata, 
                            t_sobres=len(tiradas))
