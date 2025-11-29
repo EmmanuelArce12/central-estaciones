@@ -5,6 +5,7 @@ import pandas as pd
 import json
 import random
 import io
+import traceback # Nuevo para ver errores reales
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -13,19 +14,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, time, timedelta
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
 load_dotenv()
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN BASE DE DATOS ---
 db_url = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'CLAVE_DEFAULT_SEGURA')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'CLAVE_SUPER_SECRETA')
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -39,19 +39,24 @@ login_manager.login_view = 'login'
 # ==========================================
 
 def calcular_info_operativa(fecha_hora_str):
+    """Calcula fecha operativa y turno basándose en la hora"""
     try:
         dt = pd.to_datetime(fecha_hora_str)
         hora = dt.hour
         fecha_op = dt.date()
         turno = "Noche"
+        # Reglas de negocio fijas para asignar turno base
         if 6 <= hora < 14: turno = "Mañana"
         elif 14 <= hora < 22: turno = "Tarde"
         else:
+            # Si es madrugada (antes de las 6), cuenta como Noche del día anterior
             if hora < 6: fecha_op = fecha_op - timedelta(days=1)
         return fecha_op.strftime('%Y-%m-%d'), turno
-    except: return datetime.now().strftime('%Y-%m-%d'), "Sin Asignar"
+    except: 
+        return datetime.now().strftime('%Y-%m-%d'), "Sin Asignar"
 
 def procesar_datos_turno(s):
+    """Procesa strings complejos del reporte VOX"""
     try:
         if '(' not in s:
             return calcular_info_operativa(s) + (None, None)
@@ -82,7 +87,7 @@ def procesar_datos_turno(s):
         return datetime.now().strftime("%Y-%m-%d"), "Error", datetime.now(), datetime.now()
 
 # ==========================================
-# 🗃️ MODELOS DE BASE DE DATOS
+# 🗃️ MODELOS DE DATOS
 # ==========================================
 
 class User(UserMixin, db.Model):
@@ -94,6 +99,7 @@ class User(UserMixin, db.Model):
     
     channels = db.relationship('Channel', backref='usuario', lazy=True, cascade="all, delete-orphan")
     cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
+    # Relaciones de datos
     reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
     tiradas = db.relationship('Tirada', backref='usuario', lazy=True, cascade="all, delete-orphan")
     ventas_vendedor = db.relationship('VentaVendedor', backref='usuario', lazy=True, cascade="all, delete-orphan")
@@ -162,6 +168,7 @@ class Tirada(db.Model):
     monto = db.Column(db.Float)
     hora = db.Column(db.String(20))
     turno = db.Column(db.String(50))
+    # Billetes
     b2000 = db.Column(db.Integer, default=0)
     b1000 = db.Column(db.Integer, default=0)
     b500 = db.Column(db.Integer, default=0)
@@ -324,6 +331,8 @@ def ping_ui():
         cmd_pendiente = (ch.comando == 'EXTRACT')
     return jsonify({"st": st, "cmd": cmd_pendiente})
 
+# 5. RECEPCIÓN ARCHIVOS (TIRADAS) - [MEJORADO: Filtros + CSV Robusto]
+# 5. RECEPCIÓN ARCHIVOS (TIRADAS) - [FILTRO DE VENDEDORES + UNION NOMBRE/APELLIDO]
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
     token = request.headers.get('X-API-TOKEN')
@@ -341,13 +350,11 @@ def api_recepcion_tiradas():
         contenido = archivo.read()
         df = None
         
-        # 1. Lectura Robusta (Ignora líneas rotas para evitar Error 500)
+        # 1. LECTURA ROBUSTA (Saltar líneas rotas para evitar error 500)
         for sep in [',', ';', '\t', r'\s+']:
             try:
                 s = io.BytesIO(contenido)
-                # 'on_bad_lines="skip"' es la clave para que no falle si una linea viene mal
                 temp = pd.read_csv(s, sep=sep, engine='python', on_bad_lines='skip')
-                
                 cols = [c.lower().strip() for c in temp.columns]
                 if 'nombre' in cols and ('total bolsa' in cols or 'total dep.' in cols): 
                     df = temp; break
@@ -355,61 +362,68 @@ def api_recepcion_tiradas():
             
         if df is None: df = pd.read_csv(io.BytesIO(contenido), on_bad_lines='skip')
 
-        # 2. Limpieza de columnas
+        # 2. LIMPIEZA COLUMNAS
         df.columns = df.columns.astype(str).str.strip()
         def get_col(keys): return next((c for c in df.columns if any(k.lower() in c.lower() for k in keys)), None)
         
         c_nom = get_col(['nombre', 'vendedor'])
         c_monto = get_col(['total bolsa', 'total dep'])
         c_fecha = get_col(['fecha', 'hora'])
-        c_dni = get_col(['dni']) # Aquí viene el APELLIDO según me dijiste
+        c_dni = get_col(['dni']) # Aquí viene el APELLIDO
         c_trans = get_col(['transaccion', 'transacción'])
 
         if not c_monto or not c_nom: 
-            return jsonify({"status": "error", "msg": "Columnas faltantes"}), 400
+            return jsonify({"status": "error", "msg": "Faltan columnas clave"}), 400
 
+        fecha_hoy = datetime.now().strftime('%Y-%m-%d')
         count = 0
+        
         for _, row in df.iterrows():
             try:
-                # A. Filtrar Playa/Shop
+                # A. FILTRAR PLAYA / SHOP (Los dejamos afuera)
                 nom_raw = str(row[c_nom]).strip()
-                if any(x in nom_raw.lower() for x in ['playa', 'shop', 'lubri']):
-                    continue # Saltamos a estos vendedores
-
-                # B. Construir Nombre Completo (Nombre + Apellido/DNI)
-                apellido = str(row[c_dni]).strip() if c_dni else ""
-                # Si el apellido parece un número (DNI real), lo ponemos entre paréntesis, sino lo sumamos como texto
-                if apellido.isdigit(): nombre_final = f"{nom_raw} ({apellido})"
-                else: nombre_final = f"{nom_raw} {apellido}".strip()
-
-                # C. Fecha y Hora
-                fecha_str_csv = str(row[c_fecha]) if c_fecha else str(datetime.now())
-                dt_obj = pd.to_datetime(fecha_str_csv)
+                nom_lower = nom_raw.lower()
                 
-                # Guardamos la fecha operativa calculada simple (luego la vista la re-acomoda)
-                fecha_op, turno_calc = calcular_info_operativa(fecha_str_csv)
-                h_str = dt_obj.strftime('%H:%M:%S')
+                # Si el nombre contiene "playa" o "shop" o "lubri", lo saltamos
+                if 'playa' in nom_lower or 'shop' in nom_lower or 'lubri' in nom_lower:
+                    continue 
 
-                # D. Evitar Duplicados
+                # B. UNIR NOMBRE + APELLIDO
+                apellido = str(row[c_dni]).strip() if c_dni else ""
+                # Limpiamos "nan" si pandas leyó vacío
+                if apellido.lower() == 'nan': apellido = ""
+                
+                # Formato final: "Juan Perez"
+                nombre_final = f"{nom_raw} {apellido}".strip()
+
+                # C. FECHA Y HORA
+                fecha_str_csv = str(row[c_fecha]) if c_fecha else str(datetime.now())
+                fecha_op, turno_calc = calcular_info_operativa(fecha_str_csv)
+                
+                h_str = "-"
+                try: h_str = pd.to_datetime(fecha_str_csv).strftime('%H:%M:%S')
+                except: pass
+
+                # D. EVITAR DUPLICADOS (ID Transacción)
                 id_trans = str(row[c_trans]) if c_trans else f"AUTO-{random.randint(10000,99999)}"
                 if c_trans and Tirada.query.filter_by(user_id=user.id, transaccion=id_trans).first():
                     continue
 
-                # E. Monto
+                # E. MONTO
                 val = float(str(row[c_monto]).replace('$','').replace('.','').replace(',','.'))
 
-                # F. Guardar
+                # F. GUARDAR
                 t = Tirada(
                     user_id=user.id, 
                     fecha_operativa=fecha_op, 
-                    turno=turno_calc, # Se guarda preliminar, la vista decide el final
-                    vendedor=nombre_final, # Aquí ya va "Nombre Apellido"
+                    turno=turno_calc, # Preliminar (la vista decide el final)
+                    vendedor=nombre_final, # Nombre Completo
                     vendedor_raw=nom_raw,
                     monto=val, 
                     hora=h_str,
                     dni=apellido,
                     transaccion=id_trans,
-                    sector="-"
+                    sector="-" # Ignoramos sector como pediste
                 )
                 db.session.add(t)
                 count += 1
@@ -420,10 +434,7 @@ def api_recepcion_tiradas():
         return jsonify({"status": "ok", "count": count}), 200
 
     except Exception as e: 
-        print(f"Error CSV: {e}")
         return jsonify({"status": "error", "msg": str(e)}), 500
-# --- VISTAS CLIENTE ---
-
 @app.route('/estacion/panel')
 @login_required
 def panel_estacion():
@@ -607,81 +618,85 @@ def subir_ventas_vendedor():
 
 # --- MÓDULO TIRADAS (CANAL 2) ---
 
+# --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     
-    # 1. Obtener REGLAS DE JUEGO (Horarios reales de la VOX para ese día)
+    # 1. OBTENER HORARIOS REALES DE LA VOX (Reportes)
+    # Buscamos qué horarios reportó la VOX para Mañana, Tarde y Noche en esa fecha
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     
-    # Estructura para guardar hora inicio/fin de cada turno
+    # Estructura para guardar los límites reales de cada turno
     horarios_vox = {
         "Mañana": {"inicio": None, "fin": None},
         "Tarde": {"inicio": None, "fin": None},
         "Noche": {"inicio": None, "fin": None}
     }
     
-    # Llenamos los horarios con la info de la base de datos (Reportes VOX)
     for r in reportes:
         if r.turno in horarios_vox:
+            # Capturamos hora de apertura
             if r.hora_apertura:
                 t = r.hora_apertura.time()
-                # Buscamos la hora más temprana registrada para apertura
+                # Si hay varios reportes (raro), nos quedamos con el inicio más temprano
                 if horarios_vox[r.turno]["inicio"] is None or t < horarios_vox[r.turno]["inicio"]:
                     horarios_vox[r.turno]["inicio"] = t
+            
+            # Capturamos hora de cierre
             if r.hora_cierre:
                 t = r.hora_cierre.time()
-                # Buscamos la hora más tardía para cierre
+                # Nos quedamos con el cierre más tardío
                 if horarios_vox[r.turno]["fin"] is None or t > horarios_vox[r.turno]["fin"]:
                     horarios_vox[r.turno]["fin"] = t
 
-    # 2. Traer todas las tiradas del día
+    # 2. TRAER TODAS LAS TIRADAS (Sin filtrar aún)
     tiradas = Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     total_plata = sum([t.monto for t in tiradas])
     
-    # 3. Clasificar Tiradas inteligentemente
+    # 3. CLASIFICAR TIRADAS INTELIGENTEMENTE
     tiradas_por_turno = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
     
     for t in tiradas:
         asignado = False
         try:
-            # Convertimos la hora de la tirada a objeto tiempo
-            hora_tirada = datetime.strptime(t.hora, "%H:%M:%S").time()
+            # Convertimos la hora de la tirada (string) a objeto time
+            h_tirada = datetime.strptime(t.hora, "%H:%M:%S").time()
             
-            # Comparamos con los horarios de la VOX
+            # Comparamos contra los rangos reales de la VOX
             for nombre_turno, rango in horarios_vox.items():
-                inicio = rango["inicio"]
+                ini = rango["inicio"]
                 fin = rango["fin"]
                 
-                if inicio and fin:
-                    # Caso normal (ej: 06:00 a 14:00)
-                    if inicio < fin:
-                        if inicio <= hora_tirada <= fin:
+                if ini and fin:
+                    # Caso A: Rango normal en el mismo día (ej: 06:00 a 14:00)
+                    if ini < fin:
+                        if ini <= h_tirada <= fin:
                             tiradas_por_turno[nombre_turno].append(t)
                             asignado = True
                             break
-                    # Caso cruce de medianoche (ej: 22:00 a 06:00)
+                    # Caso B: Rango que cruza la medianoche (ej: 22:00 a 06:00)
                     else:
-                        if hora_tirada >= inicio or hora_tirada <= fin:
+                        if h_tirada >= ini or h_tirada <= fin:
                             tiradas_por_turno[nombre_turno].append(t)
                             asignado = True
                             break
             
-            # Si no calzó en ningún horario VOX (o no hay reporte todavía), usamos lógica fija por defecto
+            # 4. FALLBACK: Si no hay reporte VOX o la hora no calza, usamos horario fijo
             if not asignado:
-                h = hora_tirada.hour
-                if 6 <= h < 14: tiradas_por_turno["Mañana"].append(t)
-                elif 14 <= h < 22: tiradas_por_turno["Tarde"].append(t)
+                hr = h_tirada.hour
+                if 6 <= hr < 14: tiradas_por_turno["Mañana"].append(t)
+                elif 14 <= hr < 22: tiradas_por_turno["Tarde"].append(t)
                 else: tiradas_por_turno["Noche"].append(t)
                 
         except:
-            # Si falla la hora, lo mandamos a 'Noche' o 'Sin Asignar'
+            # Si la hora es inválida o falla algo, lo mandamos a Noche para no perder el dato
             tiradas_por_turno["Noche"].append(t)
 
     return render_template('tiradas.html', 
-                           tiradas=tiradas, # Lista completa (por si acaso)
-                           tiradas_por_turno=tiradas_por_turno, # Lista clasificada
+                           tiradas=tiradas, 
+                           tiradas_por_turno=tiradas_por_turno, 
                            fecha=fecha, 
                            t_plata=total_plata, 
                            t_sobres=len(tiradas))
