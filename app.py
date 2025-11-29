@@ -705,7 +705,7 @@ def ver_tiradas_web():
         datos_agrupados[turno_asignado][vend]["count"] += 1
 
     return render_template('tiradas.html', 
-                           datos=datos_agrupados, # Nueva estructura
+                           tiradas_por_turno=datos_agrupados, # <--- CORREGIDO
                            fecha=fecha, 
                            t_plata=total_plata, 
                            t_sobres=len(tiradas))
