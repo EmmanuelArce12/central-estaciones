@@ -4,6 +4,7 @@ import difflib
 import pandas as pd
 import json
 import random
+import io
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -34,10 +35,9 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 # ==========================================
-# 🛠️ FUNCIONES AUXILIARES (CRÍTICAS)
+# 🛠️ FUNCIONES AUXILIARES
 # ==========================================
 
-# 1. Función para calcular turno simple (CSV)
 def calcular_info_operativa(fecha_hora_str):
     try:
         dt = pd.to_datetime(fecha_hora_str)
@@ -51,14 +51,8 @@ def calcular_info_operativa(fecha_hora_str):
         return fecha_op.strftime('%Y-%m-%d'), turno
     except: return datetime.now().strftime('%Y-%m-%d'), "Sin Asignar"
 
-# 2. Función para procesar reporte VOX (ESTA FALTABA O ESTABA DAÑADA)
 def procesar_datos_turno(s):
-    """
-    Parsea strings complejos del VOX tipo:
-    '2023-11-28 (2023/11/28 06:00:00 - 2023/11/28 14:00:00)'
-    """
     try:
-        # Si el string viene limpio (solo fecha), lo manejamos simple
         if '(' not in s:
             return calcular_info_operativa(s) + (None, None)
 
@@ -67,7 +61,6 @@ def procesar_datos_turno(s):
         str_apertura = partes[0].strip()
         str_cierre = partes[1].strip()
         
-        # Intentamos formatos comunes de VOX
         for fmt in ["%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M:%S"]:
             try:
                 dt_apertura = datetime.strptime(str_apertura, fmt)
@@ -75,7 +68,6 @@ def procesar_datos_turno(s):
                 break
             except: continue
         
-        # Lógica de turno operativo
         h = dt_cierre.hour
         fecha_obj = dt_cierre.date()
         turno = "Noche"
@@ -83,14 +75,10 @@ def procesar_datos_turno(s):
         if 6 <= h < 14: turno = "Mañana"
         elif 14 <= h < 22: turno = "Tarde"
         else:
-            # Si es madrugada (ej 02:00 AM), pertenece al día operativo anterior
             if h < 6: fecha_obj = fecha_obj - timedelta(days=1)
         
         return fecha_obj.strftime("%Y-%m-%d"), turno, dt_cierre, dt_apertura
-        
-    except Exception as e: 
-        print(f"⚠️ Error parseando fecha VOX '{s}': {e}")
-        # Fallback de emergencia: devolver valores por defecto para no romper el server (Error 500)
+    except: 
         return datetime.now().strftime("%Y-%m-%d"), "Error", datetime.now(), datetime.now()
 
 # ==========================================
@@ -219,7 +207,6 @@ def logout():
 def panel_superadmin():
     if not current_user.is_superadmin: return "Acceso Denegado"
     msg = ""
-    
     if request.method == 'POST':
         if 'create_user' in request.form:
             u = request.form.get('username'); p = request.form.get('password')
@@ -240,17 +227,15 @@ def panel_superadmin():
             code = request.form.get('pairing_code').strip().upper()
             if ch and code:
                 ch.code = code; ch.status = 'waiting'; db.session.commit()
-                msg = f"🔗 Esperando conexión en {ch.nombre}"
+                msg = f"🔗 Esperando conexión."
         elif 'delete_channel' in request.form:
-            db.session.delete(Channel.query.get(request.form.get('channel_id')))
-            db.session.commit()
+            db.session.delete(Channel.query.get(request.form.get('channel_id'))); db.session.commit()
         elif 'revoke_channel' in request.form:
             ch = Channel.query.get(request.form.get('channel_id'))
             if ch: ch.token = None; ch.status = 'offline'; ch.code = None; db.session.commit()
         elif 'clean_database' in request.form:
             try: db.session.query(Tirada).delete(); db.session.commit(); msg = "✅ Base limpia."
             except: db.session.rollback()
-
     return render_template('admin_dashboard.html', users=User.query.all(), msg=msg)
 
 @app.route('/admin/eliminar-estacion/<int:id>', methods=['POST'])
@@ -271,23 +256,14 @@ def admin_status_all():
         for ch in u.channels:
             st = ch.status
             if ch.last_check and (ahora - ch.last_check).total_seconds() > 120: st = 'offline'
-            channels_data.append({
-                "id": ch.id, "nombre": ch.nombre, "tipo": ch.tipo,
-                "status": st, "token": ch.token, "code": ch.code,
-                "last_check": ch.last_check.strftime('%H:%M') if ch.last_check else "-"
-            })
-        data.append({
-            "id": u.id, "username": u.username,
-            "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "-",
-            "channels": channels_data
-        })
+            channels_data.append({"id": ch.id, "nombre": ch.nombre, "tipo": ch.tipo, "status": st, "token": ch.token, "code": ch.code, "last_check": ch.last_check.strftime('%H:%M') if ch.last_check else "-"})
+        data.append({"id": u.id, "username": u.username, "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "-", "channels": channels_data})
     return jsonify(data)
 
 # ==========================================
-# 📡 APIS AGENTE (COMUNICACIÓN)
+# 📡 APIS COMUNICACIÓN
 # ==========================================
 
-# 1. HANDSHAKE
 @app.route('/api/handshake/tiradas', methods=['POST']) 
 @app.route('/api/handshake/poll', methods=['POST'])
 def handshake_generic():
@@ -300,7 +276,6 @@ def handshake_generic():
         return jsonify({"status": "linked", "api_token": ch.token}), 200
     return jsonify({"status": "waiting"}), 200
 
-# 2. SYNC (LATIDO)
 @app.route('/api/tiradas/sync', methods=['POST'])
 @app.route('/api/agent/sync', methods=['POST'])
 def sync_generic():
@@ -323,54 +298,32 @@ def sync_generic():
     db.session.commit()
     return jsonify(resp), 200
 
-# 3. REPORTAR (RECIBE DATOS DE VOX) -> ¡AQUÍ FALLABA!
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
         tk = request.headers.get('X-API-TOKEN')
         ch = Channel.query.filter_by(token=tk).first()
         if not ch or ch.tipo != 'VOX': return jsonify({"status":"error", "msg":"Token invalido"}), 401
-        
-        n = request.json
-        nid = n.get('id_interno')
-        u_id = ch.user_id 
-        
-        # Chequeo duplicados
-        if Reporte.query.filter_by(id_interno=nid, user_id=u_id).first(): 
-            return jsonify({"status":"ignorado"}), 200
-            
-        # AQUÍ SE LLAMA A LA FUNCIÓN QUE FALTABA
+        n = request.json; nid = n.get('id_interno'); u_id = ch.user_id 
+        if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): return jsonify({"status":"ignorado"}), 200
         f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
-        
         if not f_op: return jsonify({"status":"error_fecha"}), 400
-
-        r = Reporte(
-            user_id=u_id, id_interno=nid, estacion=n.get('estacion'), 
-            fecha_completa=n.get('fecha'), monto=n.get('monto'), 
-            fecha_operativa=f_op, turno=turno, 
-            hora_cierre=dt_cierre, hora_apertura=dt_apertura
-        )
-        db.session.add(r)
-        db.session.commit()
+        r = Reporte(user_id=u_id, id_interno=nid, estacion=n.get('estacion'), fecha_completa=n.get('fecha'), monto=n.get('monto'), fecha_operativa=f_op, turno=turno, hora_cierre=dt_cierre, hora_apertura=dt_apertura)
+        db.session.add(r); db.session.commit()
         return jsonify({"status":"exito"}), 200
-    except Exception as e: 
-        print(f"🔥 Error en api_reportar: {e}")
-        return jsonify({"status":"error", "msg": str(e)}), 500
+    except Exception as e: return jsonify({"status":"error", "msg": str(e)}), 500
 
-# 4. PING UI (SEMÁFORO)
 @app.route('/api/ping-ui')
 @login_required
 def ping_ui():
     ch = next((c for c in current_user.channels if c.tipo == 'VOX'), None)
-    st = 'offline'
-    cmd_pendiente = False
+    st = 'offline'; cmd_pendiente = False
     if ch:
         st = ch.status
         if ch.last_check and (datetime.now() - ch.last_check).total_seconds() > 120: st = 'offline'
         cmd_pendiente = (ch.comando == 'EXTRACT')
     return jsonify({"st": st, "cmd": cmd_pendiente})
 
-# 5. RECEPCIÓN ARCHIVOS (TIRADAS) - [VERSIÓN REAL QUE GUARDA DATOS]
 @app.route('/api/recepcion-tiradas', methods=['POST'])
 def api_recepcion_tiradas():
     token = request.headers.get('X-API-TOKEN')
@@ -385,15 +338,14 @@ def api_recepcion_tiradas():
     archivo = request.files['archivo']
     
     try:
-        import io
         contenido = archivo.read()
         df = None
         
         # 1. Intentar leer con diferentes separadores (CSV a veces viene con ; o tabulaciones)
-        for sep in [',', ';', '\t', '\s+']:
+        for sep in [',', ';', '\t', r'\s+']:
             try:
                 s = io.BytesIO(contenido)
-                temp = pd.read_csv(s, sep=sep, engine='python') if sep=='\s+' else pd.read_csv(s, sep=sep)
+                temp = pd.read_csv(s, sep=sep, engine='python') if sep==r'\s+' else pd.read_csv(s, sep=sep)
                 # Verificamos si detectó columnas clave
                 cols = [c.lower().strip() for c in temp.columns]
                 if 'nombre' in cols and ('total bolsa' in cols or 'total dep.' in cols): 
@@ -425,7 +377,6 @@ def api_recepcion_tiradas():
         # Buscar vendedores oficiales para corregir nombres (Fuzzy Match)
         ventas_exist = VentaVendedor.query.filter_by(user_id=user.id, fecha=fecha_hoy).all()
         oficiales = list(set([v.vendedor for v in ventas_exist]))
-        import difflib
         
         count = 0
         for _, row in df.iterrows():
@@ -496,6 +447,7 @@ def api_recepcion_tiradas():
     except Exception as e: 
         print(f"Error general CSV: {e}")
         return jsonify({"status": "error", "msg": str(e)}), 500
+
 # --- VISTAS CLIENTE ---
 
 @app.route('/estacion/panel')
@@ -542,32 +494,22 @@ def estado_tiradas():
 def config_vox():
     ch = next((c for c in current_user.channels if c.tipo == 'VOX'), None)
     if not ch:
-        ch = Channel(user_id=current_user.id, tipo='VOX', nombre='VOX Principal')
-        db.session.add(ch); db.session.commit()
-
+        ch = Channel(user_id=current_user.id, tipo='VOX', nombre='VOX Principal'); db.session.add(ch); db.session.commit()
     msg = ""
     import json
     if request.method == 'POST':
         try:
             nuevos_datos = {'ip': request.form.get('ip'), 'u': request.form.get('u'), 'p': request.form.get('p')}
-            ch.config_data = json.dumps(nuevos_datos)
-            db.session.commit()
-            msg = "✅ Configuración guardada."
+            ch.config_data = json.dumps(nuevos_datos); db.session.commit(); msg = "✅ Configuración guardada."
         except: msg = "❌ Error al guardar"
-
     datos_guardados = {}
     if ch.config_data:
         try: datos_guardados = json.loads(ch.config_data)
         except: pass
-
     class CredsFake:
-        vox_ip = datos_guardados.get('ip', '')
-        vox_usuario = datos_guardados.get('u', '')
-        vox_clave = datos_guardados.get('p', '')
-
+        vox_ip = datos_guardados.get('ip', ''); vox_usuario = datos_guardados.get('u', ''); vox_clave = datos_guardados.get('p', '')
     is_online = (ch.status == 'online')
     last_seen = ch.last_check.strftime("%H:%M:%S") if ch.last_check else "Nunca"
-    
     return render_template('configurar_vox.html', cred=CredsFake(), msg=msg, is_online=is_online, last_seen=last_seen, user=current_user)
 
 @app.route('/api/resumen-dia/<string:fecha>')
@@ -577,16 +519,13 @@ def api_res(fecha):
     agrupado = {}
     for r in reps:
         if r.turno not in agrupado: agrupado[r.turno] = { "monto": 0.0, "apertura": r.hora_apertura, "cierre": r.hora_cierre, "count": 0 }
-        agrupado[r.turno]["monto"] += r.monto
-        agrupado[r.turno]["count"] += 1
+        agrupado[r.turno]["monto"] += r.monto; agrupado[r.turno]["count"] += 1
         if r.hora_apertura and (not agrupado[r.turno]["apertura"] or r.hora_apertura < agrupado[r.turno]["apertura"]): agrupado[r.turno]["apertura"] = r.hora_apertura
         if r.hora_cierre and (not agrupado[r.turno]["cierre"] or r.hora_cierre > agrupado[r.turno]["cierre"]): agrupado[r.turno]["cierre"] = r.hora_cierre
     salida = []
     for turno in ["Mañana", "Tarde", "Noche"]:
         if turno in agrupado:
-            d = agrupado[turno]
-            ini = d["apertura"].strftime("%H:%M:%S") if d["apertura"] else "??"
-            fin = d["cierre"].strftime("%H:%M:%S") if d["cierre"] else "??"
+            d = agrupado[turno]; ini = d["apertura"].strftime("%H:%M:%S") if d["apertura"] else "??"; fin = d["cierre"].strftime("%H:%M:%S") if d["cierre"] else "??"
             salida.append({ "turno": turno, "monto": d["monto"], "cantidad_cierres": d["count"], "horario_real": f"{ini} a {fin}" })
     return jsonify(salida)
 @app.route('/estacion/ventas-vendedor', methods=['GET'])
