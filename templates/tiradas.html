@@ -4,173 +4,247 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Tiradas</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        
-        /* HEADER */
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: white; padding: 15px 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-        .header h2 { margin: 0; color: #2c3e50; font-size: 1.5rem; }
-        .date-picker { display: flex; align-items: center; gap: 10px; }
-        input[type="date"] { padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 1rem; }
-        
-        /* RESUMEN SUPERIOR */
-        .summary-cards { display: flex; gap: 15px; margin-bottom: 20px; }
-        .card { flex: 1; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.03); text-align: center; }
-        .card-title { font-size: 0.85rem; color: #777; text-transform: uppercase; letter-spacing: 1px; }
-        .card-value { font-size: 1.8rem; font-weight: bold; color: #2c3e50; margin-top: 5px; }
-        .card.money .card-value { color: #27ae60; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
+        .btn-back { text-decoration: none; color: #555; font-weight: bold; border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; background: white; transition:0.2s; }
+        .btn-back:hover { background: #e9ecef; }
 
-        /* SECCIONES DE TURNO */
-        .turno-section { margin-bottom: 30px; }
-        .turno-header { 
-            background: #34495e; color: white; padding: 10px 15px; 
-            border-radius: 8px 8px 0 0; font-weight: bold; letter-spacing: 1px;
-            display: flex; justify-content: space-between;
-        }
-        
-        /* ACORDEON VENDEDORES */
-        .vendor-group { background: white; border: 1px solid #eee; margin-bottom: 5px; border-radius: 4px; overflow: hidden; }
-        
-        .vendor-btn {
-            width: 100%; text-align: left; padding: 12px 15px; border: none; background: white;
-            display: flex; justify-content: space-between; align-items: center; cursor: pointer;
-            transition: background 0.2s;
-        }
-        .vendor-btn:hover { background: #f8f9fa; }
-        .vendor-name { font-weight: 600; font-size: 1rem; color: #2c3e50; display: flex; align-items: center; gap: 10px; }
-        .vendor-stats { display: flex; gap: 15px; align-items: center; }
-        .badge { background: #e0e0e0; color: #555; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: normal; }
-        .money-tag { color: #27ae60; font-weight: bold; }
-        
-        .vendor-content { 
-            display: none; /* Oculto por defecto */
-            background: #fafafa; border-top: 1px solid #eee; padding: 10px; 
-        }
-        .vendor-content.active { display: block; }
+        /* FILTROS */
+        .filter-bar { background: #fff; padding: 10px 20px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 20px; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .filter-item { display: flex; align-items: center; gap: 5px; font-size: 0.9rem; font-weight: 600; color: #555; cursor: pointer; }
+        input[type="checkbox"] { transform: scale(1.2); cursor: pointer; }
 
-        /* TABLA INTERNA */
-        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; background: white; border-radius: 4px; overflow: hidden; }
-        th { text-align: left; padding: 10px; background: #eee; color: #555; font-size: 0.8rem; }
-        td { padding: 10px; border-bottom: 1px solid #f1f1f1; }
-        tr:last-child td { border-bottom: none; }
+        /* TARJETAS CONTROL */
+        .control-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .card-remote { border-left: 5px solid #e67e22; }
         
-        .time { font-family: monospace; color: #666; }
-        .amount { font-weight: bold; color: #333; }
+        button.btn-orange { width: 100%; padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; background-color: #e67e22; margin-top: 10px; transition:0.2s; }
+        button.btn-orange:hover { background-color: #d35400; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* SECCIONES POR TURNO */
+        .turno-section { margin-bottom: 30px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        .turno-header { padding: 12px 20px; color: white; font-size: 1.1rem; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
         
-        .empty-msg { text-align: center; padding: 20px; color: #999; font-style: italic; }
+        .Mañana .turno-header { background: linear-gradient(to right, #f1c40f, #d4ac0d); }
+        .Tarde .turno-header { background: linear-gradient(to right, #e67e22, #d35400); }
+        .Noche .turno-header { background: linear-gradient(to right, #2c3e50, #1a252f); }
+        .Sin.Asignar .turno-header { background: #95a5a6; }
+
+        /* VENDEDORES (ACORDEON) */
+        .vendedor-header { display: flex; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid #eee; cursor: pointer; background: white; transition: background 0.2s; }
+        .vendedor-header:hover { background: #f9f9f9; }
+        .vendedor-header.active { background: #f0f4f8; border-left: 4px solid #3498db; }
+
+        /* ESTILO ESPECIAL PARA MÁQUINAS */
+        .is-machine { background-color: #fff8e1; border-left: 4px solid #f1c40f !important; }
+        .is-machine .vh-name { color: #d35400; }
+
+        .vh-name { font-weight: 800; color: #2c3e50; font-size: 1.1rem; }
+        .vh-total { font-weight: 800; color: #27ae60; font-size: 1.1rem; }
+        .vh-count { font-size: 0.85rem; color: #888; margin-left: 10px; font-weight: normal; }
+
+        .vendedor-content { display: none; background: #fafafa; padding: 0; }
+        .vendedor-content.active { display: block; }
         
-        .btn-back { text-decoration: none; color: #666; font-size: 0.9rem; display: flex; align-items: center; gap: 5px; }
-        .btn-back:hover { color: #000; }
+        /* TABLA DETALLE */
+        table { width: 100%; border-collapse: collapse; }
+        td, th { padding: 10px 20px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        th { color: #888; font-weight: normal; font-size: 0.8rem; text-transform: uppercase; background: #fff; }
+        
+        /* COLUMNAS OCULTABLES */
+        .col-bills, .col-meta { display: none; }
+        .show-bills .col-bills { display: table-cell; }
+        .show-meta .col-meta { display: table-cell; }
+
+        .bill-tag { background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: #495057; display: inline-block; margin-right: 4px; margin-bottom: 4px; }
+        .bill-val { font-weight: bold; }
+        
+        /* ESTADO */
+        .status-badge { padding: 5px 10px; border-radius: 15px; font-weight: bold; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 5px; }
+        .st-online { background:#d4edda; color:#155724; border:1px solid #c3e6cb; } .st-offline { background:#f8d7da; color:#721c24; border:1px solid #f5c6cb; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot-green { background:#28a745; } .dot-red { background:#dc3545; }
     </style>
 </head>
 <body>
 
-<div class="container">
     <div class="header">
-        <a href="/estacion/panel" class="btn-back"><i class="fa-solid fa-arrow-left"></i> Volver</a>
-        <h2><i class="fa-solid fa-envelope-open-text"></i> Control de Tiradas</h2>
-        <div class="date-picker">
-            <button onclick="cambiarFecha(-1)" style="border:none; background:none; cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></button>
-            <input type="date" id="fechaSelector" value="{{ fecha }}" onchange="filtrarFecha()">
-            <button onclick="cambiarFecha(1)" style="border:none; background:none; cursor:pointer;"><i class="fa-solid fa-chevron-right"></i></button>
-        </div>
+        <a href="/estacion/panel" class="btn-back">⬅️ Volver</a>
+        <h1>💸 Sobres y Tiradas</h1>
     </div>
 
-    <div class="summary-cards">
-        <div class="card">
-            <div class="card-title">Total Sobres</div>
-            <div class="card-value">{{ t_sobres }}</div>
-        </div>
-        <div class="card money">
-            <div class="card-title">Monto Total</div>
-            <div class="card-value">${{ "{:,.0f}".format(t_plata).replace(',', '.') }}</div>
-        </div>
+    <div class="filter-bar">
+        <span>👁️ Visualización:</span>
+        <label class="filter-item">
+            <input type="checkbox" id="chkBills" onchange="toggleView()"> 💵 Desglose Billetes
+        </label>
+        <label class="filter-item">
+            <input type="checkbox" id="chkMeta" onchange="toggleView()"> 🆔 Info Técnica
+        </label>
     </div>
 
-    {% for turno in ["Mañana", "Tarde", "Noche"] %}
-    <div class="turno-section">
-        <div class="turno-header">
-            <span><i class="fa-regular fa-clock"></i> Turno {{ turno }}</span>
-            <!-- Calcular total del turno -->
-            {% set total_turno = namespace(value=0) %}
-            {% for v, d in datos[turno].items() %}{% set total_turno.value = total_turno.value + d.total %}{% endfor %}
-            <span>${{ "{:,.0f}".format(total_turno.value).replace(',', '.') }}</span>
-        </div>
-
-        {% if datos[turno] %}
-            {% for vendedor, info in datos[turno].items() %}
-            <div class="vendor-group">
-                <button class="vendor-btn" onclick="toggleVendor(this)">
-                    <div class="vendor-name">
-                        <i class="fa-solid fa-user-circle" style="color:#aaa;"></i>
-                        {{ vendedor }}
-                    </div>
-                    <div class="vendor-stats">
-                        <span class="badge">{{ info.count }} tiradas</span>
-                        <span class="money-tag">${{ "{:,.0f}".format(info.total).replace(',', '.') }}</span>
-                        <i class="fa-solid fa-chevron-down" style="font-size:0.8rem; color:#ccc;"></i>
-                    </div>
-                </button>
-                
-                <div class="vendor-content">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Hora</th>
-                                <th>Transacción</th>
-                                <th>Detalle</th>
-                                <th style="text-align:right;">Monto</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for t in info.items %}
-                            <tr>
-                                <td class="time"><i class="fa-regular fa-clock"></i> {{ t.hora }}</td>
-                                <td style="color:#777; font-size:0.8rem;">{{ t.transaccion }}</td>
-                                <td>Sobres / Efectivo</td>
-                                <td style="text-align:right;" class="amount">${{ "{:,.0f}".format(t.monto).replace(',', '.') }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+    <div class="control-bar">
+        <div class="card card-remote">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="font-weight:bold; color:#555;">📡 Estado Agente:</label>
+                <div id="statusBadge" class="status-badge st-offline"><span class="dot dot-red"></span> OFFLINE</div>
             </div>
-            {% endfor %}
+            <p style="font-size:0.8rem; color:#666; margin: 5px 0;">Última señal: <span id="lastSeen">-</span></p>
+            <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()" disabled>⏳ Buscando conexión...</button>
+            <div id="msgEstado" style="text-align:center; font-size:0.8rem; color:#e67e22; margin-top:8px; display:none;"></div>
+        </div>
+
+        <div class="card" style="border-left: 5px solid #3498db;">
+            <label style="font-weight:bold; color:#555;">📅 Fecha:</label>
+            <input type="date" value="{{ fecha }}" onchange="window.location.href='?fecha='+this.value" style="width:100%; padding:10px; margin-top:10px; border:1px solid #ccc; border-radius:5px;">
+        </div>
+    </div>
+
+    <div id="mainTable">
+        {% set hay_datos = false %}
+        
+        {% for turno in ['Mañana', 'Tarde', 'Noche', 'Sin Asignar'] %}
+            {% if tiradas_por_turno[turno] %}
+                {% set hay_datos = true %}
+                
+                <div class="turno-section {{ turno }}">
+                    <div class="turno-header">{{ turno }}</div>
+                    
+                    {% for vendedor, items in tiradas_por_turno[turno] | sort(attribute='vendedor') | groupby('vendedor') %}
+                        {% set total = items | sum(attribute='monto') %}
+                        
+                        {% set is_machine = 'buzon' in vendedor.lower() or 'caja' in vendedor.lower() or 'interno' in vendedor.lower() %}
+                        
+                        <div>
+                            <div class="vendedor-header {% if is_machine %}is_machine{% endif %}" onclick="this.nextElementSibling.classList.toggle('active')">
+                                <div>
+                                    <span class="vh-name">{{ vendedor }}</span>
+                                    <span class="vh-count">({{ items|length }} sobres)</span>
+                                </div>
+                                <span class="vh-total">$ {{ "{:,.2f}".format(total) }}</span>
+                            </div>
+                            
+                            <div class="vendedor-content">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Hora</th>
+                                            <th>Nombre CSV</th>
+                                            <th class="col-meta">Info Extra</th>
+                                            <th class="col-bills">Billetes</th>
+                                            <th>Monto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for t in items %}
+                                        <tr>
+                                            <td>{{ t.hora }}</td>
+                                            <td>{{ t.vendedor_raw }}</td>
+                                            
+                                            <td class="col-meta" style="font-size:0.8rem; color:#666;">
+                                                DNI: {{ t.dni }}<br>ID: {{ t.transaccion }}
+                                            </td>
+                                            
+                                            <td class="col-bills">
+                                                {% if t.b2000 > 0 %}<span class="bill-tag">$2000 x <span class="bill-val">{{ t.b2000 }}</span></span>{% endif %}
+                                                {% if t.b1000 > 0 %}<span class="bill-tag">$1000 x <span class="bill-val">{{ t.b1000 }}</span></span>{% endif %}
+                                                {% if t.b500 > 0 %}<span class="bill-tag">$500 x <span class="bill-val">{{ t.b500 }}</span></span>{% endif %}
+                                                {% if t.b200 > 0 %}<span class="bill-tag">$200 x <span class="bill-val">{{ t.b200 }}</span></span>{% endif %}
+                                                {% if t.b100 > 0 %}<span class="bill-tag">$100 x <span class="bill-val">{{ t.b100 }}</span></span>{% endif %}
+                                                {% if t.cant_billetes > 0 %}<span style="color:#888; font-size:0.75rem;">(Total: {{ t.cant_billetes }})</span>{% endif %}
+                                            </td>
+
+                                            <td style="color:#27ae60; font-weight:bold;">$ {{ "{:,.2f}".format(t.monto) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endfor %}
+
+        {% if hay_datos %}
+            <div style="padding:20px; background:#fff; text-align:right; border-top:2px dashed #ddd; border-radius:12px;">
+                <span style="font-size:1rem; color:#666; margin-right:10px;">TOTAL DÍA:</span>
+                <span style="font-size:1.8rem; font-weight:bold; color:#27ae60;">$ {{ "{:,.2f}".format(t_plata) }}</span>
+            </div>
         {% else %}
-            <div class="empty-msg">Sin movimientos registrados.</div>
+            <div style="text-align:center; padding:40px; color:#999; border: 2px dashed #ddd; border-radius:10px;">
+                <h3>📭 Sin datos hoy</h3>
+                <p>Verifica que el Agente esté ONLINE y presiona "Solicitar Datos".</p>
+            </div>
         {% endif %}
     </div>
-    {% endfor %}
 
-</div>
+    <script>
+        // --- VISTA DINÁMICA ---
+        function toggleView() {
+            const table = document.getElementById('mainTable');
+            const showBills = document.getElementById('chkBills').checked;
+            const showMeta = document.getElementById('chkMeta').checked;
 
-<script>
-    function toggleVendor(btn) {
-        const content = btn.nextElementSibling;
-        content.classList.toggle('active');
-        const icon = btn.querySelector('.fa-chevron-down');
-        if(content.classList.contains('active')) {
-            icon.style.transform = 'rotate(180deg)';
-        } else {
-            icon.style.transform = 'rotate(0deg)';
+            if (showBills) table.classList.add('show-bills'); else table.classList.remove('show-bills');
+            if (showMeta) table.classList.add('show-meta'); else table.classList.remove('show-meta');
         }
-    }
 
-    function filtrarFecha() {
-        const fecha = document.getElementById('fechaSelector').value;
-        window.location.href = `/estacion/tiradas?fecha=${fecha}`;
-    }
+        // --- CONEXIÓN Y SOLICITUD ---
+        let isProcessing = false;
+        
+        function checkStatus() {
+            if (isProcessing) return;
+            fetch('/api/estado-tiradas').then(r=>r.json()).then(data => {
+                const btn = document.getElementById('btnSolicitar');
+                const badge = document.getElementById('statusBadge');
+                document.getElementById('lastSeen').innerText = data.ultima_vez;
 
-    function cambiarFecha(dias) {
-        const input = document.getElementById('fechaSelector');
-        const fecha = new Date(input.value + 'T00:00:00'); // Fix zona horaria
-        fecha.setDate(fecha.getDate() + dias);
-        input.value = fecha.toISOString().split('T')[0];
-        filtrarFecha();
-    }
-</script>
+                if (data.online) {
+                    badge.className = 'status-badge st-online'; badge.innerHTML = '<span class="dot dot-green"></span> CONECTADO';
+                    btn.disabled = false; btn.innerText = "📥 SOLICITAR DATOS AHORA";
+                } else {
+                    badge.className = 'status-badge st-offline'; badge.innerHTML = '<span class="dot dot-red"></span> OFFLINE';
+                    btn.disabled = true; btn.innerText = "⛔ Agente Desconectado";
+                }
+            });
+        }
 
+        function solicitarRemoto() {
+            isProcessing = true;
+            const btn = document.getElementById('btnSolicitar');
+            const msg = document.getElementById('msgEstado');
+            btn.disabled = true; btn.innerText = "📡 Enviando...";
+            msg.style.display = 'block'; msg.innerText = "Contactando...";
+
+            fetch('/api/lanzar-tiradas', {method:'POST'}).then(r=>r.json()).then(d => {
+                if(d.status==='ok') {
+                    msg.innerText = "Orden recibida. Esperando...";
+                    waitForCompletion();
+                } else { alert("Error"); isProcessing = false; }
+            });
+        }
+
+        function waitForCompletion() {
+            const i = setInterval(() => {
+                fetch('/api/estado-tiradas').then(r=>r.json()).then(d => {
+                    if (!d.comando_pendiente) {
+                        clearInterval(i);
+                        document.getElementById('msgEstado').innerText = "✅ ¡Datos recibidos!";
+                        setTimeout(() => window.location.reload(), 1500);
+                    }
+                });
+            }, 1000);
+            setTimeout(() => { clearInterval(i); window.location.reload(); }, 15000);
+        }
+
+        setInterval(checkStatus, 3000);
+        checkStatus();
+    </script>
 </body>
 </html>
