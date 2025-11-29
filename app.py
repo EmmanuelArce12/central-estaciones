@@ -284,6 +284,7 @@ def handshake_generic():
     return jsonify({"status": "waiting"}), 200
 
 @app.route('/api/tiradas/sync', methods=['POST'])
+# B. MODIFICAR: SYNC (Le pasa la config al agente Tiradas también)
 @app.route('/api/agent/sync', methods=['POST'])
 def sync_generic():
     token = request.headers.get('X-API-TOKEN')
@@ -293,18 +294,22 @@ def sync_generic():
     ch.status = 'online'; ch.last_check = datetime.now()
     resp = {"status": "ok", "command": ch.comando}
     
-    if ch.tipo == 'VOX':
-        if ch.comando == 'EXTRACT': ch.comando = None
-        import json
-        conf = {}
-        if ch.config_data:
-            try: conf = json.loads(ch.config_data)
-            except: pass
-        resp['config'] = {"ip": conf.get('ip'), "u": conf.get('u'), "p": conf.get('p')}
+    # Enviamos configuración (IP para VOX, o Filtro Fecha para TIRADAS)
+    import json
+    conf = {}
+    if ch.config_data:
+        try: conf = json.loads(ch.config_data)
+        except: pass
+        
+    resp['config'] = conf # Enviamos todo el JSON de config
     
+    # IMPORTANTE: Si es Tiradas, NO borramos el comando aquí. 
+    # El agente lo borrará cuando termine de subir todos los archivos.
+    if ch.tipo == 'VOX' and ch.comando == 'EXTRACT': 
+        ch.comando = None
+
     db.session.commit()
     return jsonify(resp), 200
-
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
@@ -455,13 +460,29 @@ def lanzar_vox():
     return jsonify({"status": "ok"})
 
 @app.route('/api/lanzar-tiradas', methods=['POST'])
+# A. MODIFICAR: LANZAR TIRADAS (Ahora recibe fecha de filtro)
+@app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_tiradas():
+    # Recibimos la fecha de inicio desde el frontend (JSON)
+    data = request.json or {}
+    fecha_filtro = data.get('fecha_inicio', '2025-01-01') # Default 2025
+
     for ch in current_user.channels:
-        if ch.tipo == 'TIRADAS': ch.comando = 'UPLOAD_TIRADAS'
+        if ch.tipo == 'TIRADAS': 
+            ch.comando = 'UPLOAD_TIRADAS'
+            # Guardamos la fecha de filtro en la config del canal para que el agente la lea
+            import json
+            current_conf = {}
+            if ch.config_data:
+                try: current_conf = json.loads(ch.config_data)
+                except: pass
+            
+            current_conf['filtro_fecha'] = fecha_filtro
+            ch.config_data = json.dumps(current_conf)
+
     db.session.commit()
     return jsonify({"status": "ok"})
-
 @app.route('/api/estado-tiradas')
 @login_required
 def estado_tiradas():

@@ -22,13 +22,18 @@
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         .card-remote { border-left: 5px solid #e67e22; }
         
-        button.btn-orange { width: 100%; padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; background-color: #e67e22; margin-top: 10px; transition:0.2s; }
+        /* ESTILOS DEL PANEL DE CARGA */
+        .load-panel { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
+        .load-row { display: flex; gap: 10px; align-items: center; }
+        .date-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-family: inherit; }
+        
+        button.btn-orange { flex: 1; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; background-color: #e67e22; transition:0.2s; }
         button.btn-orange:hover { background-color: #d35400; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
 
         /* SECCIONES POR TURNO */
         .turno-section { margin-bottom: 30px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
-        .turno-header { padding: 12px 20px; color: white; font-size: 1.1rem; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+        .turno-header { padding: 12px 20px; color: white; font-size: 1.1rem; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; display: flex; justify-content: space-between; }
         
         .Mañana .turno-header { background: linear-gradient(to right, #f1c40f, #d4ac0d); }
         .Tarde .turno-header { background: linear-gradient(to right, #e67e22, #d35400); }
@@ -89,19 +94,34 @@
     </div>
 
     <div class="control-bar">
+        <!-- TARJETA AGENTE REMOTO -->
         <div class="card card-remote">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <label style="font-weight:bold; color:#555;">📡 Estado Agente:</label>
                 <div id="statusBadge" class="status-badge st-offline"><span class="dot dot-red"></span> OFFLINE</div>
             </div>
             <p style="font-size:0.8rem; color:#666; margin: 5px 0;">Última señal: <span id="lastSeen">-</span></p>
-            <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()" disabled>⏳ Buscando conexión...</button>
-            <div id="msgEstado" style="text-align:center; font-size:0.8rem; color:#e67e22; margin-top:8px; display:none;"></div>
+            
+            <!-- PANEL DE CARGA CON FECHA -->
+            <div class="load-panel">
+                <label style="font-size:0.85rem; font-weight:600; color:#555; display:block; margin-bottom:5px;">📥 Traer movimientos desde:</label>
+                <div class="load-row">
+                    <input type="date" id="fechaInicioCarga" class="date-input" value="2025-01-01">
+                    <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()" disabled>INICIAR CARGA</button>
+                </div>
+                <div id="msgEstado" style="text-align:center; font-size:0.8rem; color:#e67e22; margin-top:8px; display:none;"></div>
+            </div>
         </div>
 
+        <!-- TARJETA FILTRO VISUAL -->
         <div class="card" style="border-left: 5px solid #3498db;">
-            <label style="font-weight:bold; color:#555;">📅 Fecha:</label>
+            <label style="font-weight:bold; color:#555;">📅 Viendo fecha:</label>
             <input type="date" value="{{ fecha }}" onchange="window.location.href='?fecha='+this.value" style="width:100%; padding:10px; margin-top:10px; border:1px solid #ccc; border-radius:5px;">
+            
+            <div style="margin-top:20px; text-align:right;">
+                <small style="color:#666;">TOTAL DÍA</small><br>
+                <span style="font-size:1.8rem; font-weight:bold; color:#27ae60;">$ {{ "{:,.0f}".format(t_plata) }}</span>
+            </div>
         </div>
     </div>
 
@@ -113,7 +133,15 @@
                 {% set hay_datos = true %}
                 
                 <div class="turno-section {{ turno }}">
-                    <div class="turno-header">{{ turno }}</div>
+                    <div class="turno-header">
+                        <span>{{ turno }}</span>
+                        <!-- Suma Total Turno -->
+                        {% set ns = namespace(total_turno=0) %}
+                        {% for vendedor, items in tiradas_por_turno[turno] | groupby('vendedor') %}
+                             {% set ns.total_turno = ns.total_turno + (items | sum(attribute='monto')) %}
+                        {% endfor %}
+                        <span>$ {{ "{:,.0f}".format(ns.total_turno) }}</span>
+                    </div>
                     
                     {% for vendedor, items in tiradas_por_turno[turno] | sort(attribute='vendedor') | groupby('vendedor') %}
                         {% set total = items | sum(attribute='monto') %}
@@ -171,15 +199,10 @@
             {% endif %}
         {% endfor %}
 
-        {% if hay_datos %}
-            <div style="padding:20px; background:#fff; text-align:right; border-top:2px dashed #ddd; border-radius:12px;">
-                <span style="font-size:1rem; color:#666; margin-right:10px;">TOTAL DÍA:</span>
-                <span style="font-size:1.8rem; font-weight:bold; color:#27ae60;">$ {{ "{:,.2f}".format(t_plata) }}</span>
-            </div>
-        {% else %}
+        {% if not hay_datos %}
             <div style="text-align:center; padding:40px; color:#999; border: 2px dashed #ddd; border-radius:10px;">
-                <h3>📭 Sin datos hoy</h3>
-                <p>Verifica que el Agente esté ONLINE y presiona "Solicitar Datos".</p>
+                <h3>📭 Sin datos para esta fecha</h3>
+                <p>Verifica la fecha seleccionada o solicita una carga nueva al Agente.</p>
             </div>
         {% endif %}
     </div>
@@ -200,33 +223,66 @@
         
         function checkStatus() {
             if (isProcessing) return;
+            
             fetch('/api/estado-tiradas').then(r=>r.json()).then(data => {
                 const btn = document.getElementById('btnSolicitar');
                 const badge = document.getElementById('statusBadge');
+                const msg = document.getElementById('msgEstado');
                 document.getElementById('lastSeen').innerText = data.ultima_vez;
 
                 if (data.online) {
-                    badge.className = 'status-badge st-online'; badge.innerHTML = '<span class="dot dot-green"></span> CONECTADO';
-                    btn.disabled = false; btn.innerText = "📥 SOLICITAR DATOS AHORA";
+                    badge.className = 'status-badge st-online'; 
+                    badge.innerHTML = '<span class="dot dot-green"></span> CONECTADO';
+                    
+                    if (data.comando_pendiente) {
+                        btn.disabled = true;
+                        btn.style.backgroundColor = "#ccc";
+                        btn.innerText = "🔄 PROCESANDO...";
+                        msg.style.display = 'block';
+                        msg.innerText = "El agente está subiendo archivos...";
+                        isProcessing = true; // Bloqueo local
+                        waitForCompletion();
+                    } else {
+                        btn.disabled = false;
+                        btn.innerText = "INICIAR CARGA";
+                        btn.style.backgroundColor = "#e67e22";
+                        msg.style.display = 'none';
+                    }
                 } else {
-                    badge.className = 'status-badge st-offline'; badge.innerHTML = '<span class="dot dot-red"></span> OFFLINE';
-                    btn.disabled = true; btn.innerText = "⛔ Agente Desconectado";
+                    badge.className = 'status-badge st-offline'; 
+                    badge.innerHTML = '<span class="dot dot-red"></span> OFFLINE';
+                    btn.disabled = true;
+                    btn.innerText = "Esperando conexión...";
                 }
             });
         }
 
         function solicitarRemoto() {
+            const fechaInicio = document.getElementById('fechaInicioCarga').value;
+            if(!confirm(`¿Iniciar carga masiva desde el ${fechaInicio}?\n\nEl agente buscará todos los archivos posteriores a esa fecha.`)) return;
+
             isProcessing = true;
             const btn = document.getElementById('btnSolicitar');
             const msg = document.getElementById('msgEstado');
-            btn.disabled = true; btn.innerText = "📡 Enviando...";
-            msg.style.display = 'block'; msg.innerText = "Contactando...";
+            
+            btn.disabled = true;
+            btn.innerText = "📡 ENVIANDO...";
+            msg.style.display = 'block';
+            msg.innerText = "Contactando agente...";
 
-            fetch('/api/lanzar-tiradas', {method:'POST'}).then(r=>r.json()).then(d => {
+            fetch('/api/lanzar-tiradas', {
+                method:'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ fecha_inicio: fechaInicio })
+            }).then(r=>r.json()).then(d => {
                 if(d.status==='ok') {
-                    msg.innerText = "Orden recibida. Esperando...";
+                    msg.innerText = "Orden recibida. El agente comenzará en breve.";
                     waitForCompletion();
-                } else { alert("Error"); isProcessing = false; }
+                } else { 
+                    alert("Error al enviar orden"); 
+                    isProcessing = false; 
+                    checkStatus(); 
+                }
             });
         }
 
@@ -235,15 +291,15 @@
                 fetch('/api/estado-tiradas').then(r=>r.json()).then(d => {
                     if (!d.comando_pendiente) {
                         clearInterval(i);
-                        document.getElementById('msgEstado').innerText = "✅ ¡Datos recibidos!";
-                        setTimeout(() => window.location.reload(), 1500);
+                        document.getElementById('msgEstado').innerText = "✅ ¡Carga completada!";
+                        isProcessing = false;
+                        setTimeout(() => window.location.reload(), 2000);
                     }
                 });
-            }, 1000);
-            setTimeout(() => { clearInterval(i); window.location.reload(); }, 15000);
+            }, 3000);
         }
 
-        setInterval(checkStatus, 3000);
+        setInterval(checkStatus, 4000);
         checkStatus();
     </script>
 </body>
