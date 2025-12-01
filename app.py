@@ -6,6 +6,7 @@ import json
 import random
 import io
 import traceback # Nuevo para ver errores reales
+from collections import Counter
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -657,55 +658,77 @@ def subir_ventas_vendedor():
 def ver_tiradas_web(): 
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     
-    # 1. HORARIOS VOX
-    reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
-    horarios_vox = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
-    
-    for r in reportes:
-        if r.turno in horarios_vox:
-            if r.hora_apertura:
-                t = r.hora_apertura.time()
-                if horarios_vox[r.turno]["inicio"] is None or t < horarios_vox[r.turno]["inicio"]: horarios_vox[r.turno]["inicio"] = t
-            if r.hora_cierre:
-                t = r.hora_cierre.time()
-                if horarios_vox[r.turno]["fin"] is None or t > horarios_vox[r.turno]["fin"]: horarios_vox[r.turno]["fin"] = t
-
-    # 2. TRAER TIRADAS
+    # 1. TRAER TODAS LAS TIRADAS DEL DÍA
     tiradas = Tirada.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     total_plata = sum([t.monto for t in tiradas])
     
-    # 3. CLASIFICAR Y AGRUPAR POR VENDEDOR
-    # Estructura: { "Mañana": { "Juan": {"total": 100, "items": [...]}, ... }, ... }
-    datos_agrupados = { "Mañana": {}, "Tarde": {}, "Noche": {}, "Sin Asignar": {} }
+    # 2. LÓGICA INTELIGENTE DE REASIGNACIÓN DE TURNOS
+    # Agrupamos temporalmente por vendedor para analizar su comportamiento
+    tiradas_por_vendedor = {}
+    for t in tiradas:
+        if t.vendedor not in tiradas_por_vendedor: tiradas_por_vendedor[t.vendedor] = []
+        tiradas_por_vendedor[t.vendedor].append(t)
+    
+    # Definimos límites horarios estrictos para referencia
+    def get_turno_estricto(hora_str):
+        try:
+            h = datetime.strptime(hora_str, "%H:%M:%S").hour
+            if 6 <= h < 14: return "Mañana"
+            elif 14 <= h < 22: return "Tarde"
+            else: return "Noche"
+        except: return "Sin Asignar"
+
+    # Procesamos cada vendedor
+    for vendedor, lista_tiradas in tiradas_por_vendedor.items():
+        # A. Calculamos el turno "estricto" de cada tirada
+        turnos_detectados = []
+        for t in lista_tiradas:
+            t.turno_calc = get_turno_estricto(t.hora) # Atributo temporal
+            turnos_detectados.append(t.turno_calc)
+        
+        # B. Encontramos el Turno Dominante (donde hizo más tiradas)
+        if not turnos_detectados: continue
+        conteo = Counter(turnos_detectados)
+        turno_dominante = conteo.most_common(1)[0][0] # El más repetido (ej: "Mañana")
+        
+        # C. Aplicamos corrección (Tolerance Window)
+        # Si el turno dominante es Mañana, y tiene una tirada en Tarde a las 14:10, la pasamos a Mañana.
+        for t in lista_tiradas:
+            # Si el turno calculado es distinto al dominante
+            if t.turno_calc != turno_dominante:
+                try:
+                    h_obj = datetime.strptime(t.hora, "%H:%M:%S")
+                    h_val = h_obj.hour + (h_obj.minute / 60.0)
+                    
+                    # CASO: Es Mañana pero se pasó a Tarde (ej: 14:15)
+                    if turno_dominante == "Mañana" and t.turno_calc == "Tarde":
+                        # Si es antes de las 15:00 (1 hora de tolerancia), lo traemos a Mañana
+                        if h_val < 15.0: 
+                            t.turno_calc = "Mañana"
+                            
+                    # CASO: Es Tarde pero se pasó a Noche (ej: 22:15)
+                    elif turno_dominante == "Tarde" and t.turno_calc == "Noche":
+                        if h_val < 23.0: 
+                            t.turno_calc = "Tarde"
+                            
+                    # CASO: Es Noche pero parece Mañana (ej: 06:10 am antes de irse)
+                    elif turno_dominante == "Noche" and t.turno_calc == "Mañana":
+                        if h_val < 7.0: 
+                            t.turno_calc = "Noche"
+                except: pass
+
+    # 3. CONSTRUIR ESTRUCTURA FINAL PARA JINJA
+    # Ahora agrupamos usando el 'turno_calc' ya corregido
+    datos_agrupados = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
     
     for t in tiradas:
-        turno_asignado = "Noche" # Default
-        try:
-            h_tirada = datetime.strptime(t.hora, "%H:%M:%S").time()
-            asignado = False
-            for nombre, rango in horarios_vox.items():
-                ini, fin = rango["inicio"], rango["fin"]
-                if ini and fin:
-                    if (ini < fin and ini <= h_tirada <= fin) or (ini > fin and (h_tirada >= ini or h_tirada <= fin)):
-                        turno_asignado = nombre; asignado = True; break
-            
-            if not asignado:
-                hr = h_tirada.hour
-                if 6 <= hr < 14: turno_asignado = "Mañana"
-                elif 14 <= hr < 22: turno_asignado = "Tarde"
-        except: pass
-
-        # Agrupar por Vendedor dentro del Turno
-        vend = t.vendedor
-        if vend not in datos_agrupados[turno_asignado]:
-            datos_agrupados[turno_asignado][vend] = { "total": 0, "count": 0, "items": [] }
-        
-        datos_agrupados[turno_asignado][vend]["items"].append(t)
-        datos_agrupados[turno_asignado][vend]["total"] += t.monto
-        datos_agrupados[turno_asignado][vend]["count"] += 1
+        # Usamos el turno calculado si existe, sino el de la base, sino Noche
+        turno_final = getattr(t, 'turno_calc', t.turno or "Noche")
+        if turno_final not in datos_agrupados: turno_final = "Sin Asignar"
+        datos_agrupados[turno_final].append(t)
 
     return render_template('tiradas.html', 
-                           tiradas_por_turno=datos_agrupados, # <--- CORREGIDO
+                           tiradas_por_turno=datos_agrupados, 
                            fecha=fecha, 
                            t_plata=total_plata, 
                            t_sobres=len(tiradas))

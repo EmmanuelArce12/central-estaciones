@@ -22,7 +22,6 @@
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         .card-remote { border-left: 5px solid #e67e22; }
         
-        /* --- NUEVO: ESTILOS DEL PANEL DE CARGA --- */
         .load-panel { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
         .load-row { display: flex; gap: 10px; align-items: center; }
         .date-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-family: inherit; }
@@ -41,11 +40,11 @@
         .Sin.Asignar .turno-header { background: #95a5a6; }
 
         /* VENDEDORES (ACORDEON) */
-        .vendedor-header { display: flex; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid #eee; cursor: pointer; background: white; transition: background 0.2s; }
+        .vendedor-block { border-bottom: 1px solid #eee; }
+        .vendedor-header { display: flex; justify-content: space-between; padding: 15px 20px; cursor: pointer; background: white; transition: background 0.2s; }
         .vendedor-header:hover { background: #f9f9f9; }
         .vendedor-header.active { background: #f0f4f8; border-left: 4px solid #3498db; }
 
-        /* ESTILO ESPECIAL PARA MÁQUINAS */
         .is-machine { background-color: #fff8e1; border-left: 4px solid #f1c40f !important; }
         .is-machine .vh-name { color: #d35400; }
 
@@ -61,7 +60,6 @@
         td, th { padding: 10px 20px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
         th { color: #888; font-weight: normal; font-size: 0.8rem; text-transform: uppercase; background: #fff; }
         
-        /* COLUMNAS OCULTABLES */
         .col-bills, .col-meta { display: none; }
         .show-bills .col-bills { display: table-cell; }
         .show-meta .col-meta { display: table-cell; }
@@ -85,43 +83,32 @@
 
     <div class="filter-bar">
         <span>👁️ Visualización:</span>
-        <label class="filter-item">
-            <input type="checkbox" id="chkBills" onchange="toggleView()"> 💵 Desglose Billetes
-        </label>
-        <label class="filter-item">
-            <input type="checkbox" id="chkMeta" onchange="toggleView()"> 🆔 Info Técnica
-        </label>
+        <label class="filter-item"><input type="checkbox" id="chkBills" onchange="toggleView()"> 💵 Billetes</label>
+        <label class="filter-item"><input type="checkbox" id="chkMeta" onchange="toggleView()"> 🆔 Info</label>
     </div>
 
     <div class="control-bar">
-        <!-- TARJETA AGENTE REMOTO (MODIFICADA) -->
         <div class="card card-remote">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <label style="font-weight:bold; color:#555;">📡 Estado Agente:</label>
+                <label style="font-weight:bold; color:#555;">📡 Agente:</label>
                 <div id="statusBadge" class="status-badge st-offline"><span class="dot dot-red"></span> OFFLINE</div>
             </div>
             <p style="font-size:0.8rem; color:#666; margin: 5px 0;">Última señal: <span id="lastSeen">-</span></p>
-            
-            <!-- PANEL DE CARGA CON FECHA -->
             <div class="load-panel">
-                <label style="font-size:0.85rem; font-weight:600; color:#555; display:block; margin-bottom:5px;">📥 Traer movimientos desde:</label>
+                <label style="font-size:0.85rem; font-weight:600; color:#555; display:block; margin-bottom:5px;">📥 Cargar desde:</label>
                 <div class="load-row">
-                    <!-- Input de Fecha -->
                     <input type="date" id="fechaInicioCarga" class="date-input" value="2025-01-01">
-                    <!-- Botón de Acción -->
-                    <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()" disabled>INICIAR CARGA</button>
+                    <button id="btnSolicitar" class="btn-orange" onclick="solicitarRemoto()" disabled>INICIAR</button>
                 </div>
                 <div id="msgEstado" style="text-align:center; font-size:0.8rem; color:#e67e22; margin-top:8px; display:none;"></div>
             </div>
         </div>
 
-        <!-- TARJETA FILTRO VISUAL -->
         <div class="card" style="border-left: 5px solid #3498db;">
-            <label style="font-weight:bold; color:#555;">📅 Viendo fecha:</label>
+            <label style="font-weight:bold; color:#555;">📅 Fecha Visualizada:</label>
             <input type="date" value="{{ fecha }}" onchange="window.location.href='?fecha='+this.value" style="width:100%; padding:10px; margin-top:10px; border:1px solid #ccc; border-radius:5px;">
-            
             <div style="margin-top:20px; text-align:right;">
-                <small style="color:#666;">TOTAL DÍA</small><br>
+                <small style="color:#666;">TOTAL RECAUDADO</small><br>
                 <span style="font-size:1.8rem; font-weight:bold; color:#27ae60;">$ {{ "{:,.0f}".format(t_plata) }}</span>
             </div>
         </div>
@@ -131,32 +118,28 @@
         {% set hay_datos = false %}
         
         {% for turno in ['Mañana', 'Tarde', 'Noche', 'Sin Asignar'] %}
-            {% if tiradas_por_turno[turno] %}
+            {% set lista_turno = tiradas_por_turno[turno] %}
+            
+            {% if lista_turno %}
                 {% set hay_datos = true %}
                 
-                <div class="turno-section {{ turno }}">
+                <div class="turno-section {{ turno.replace(' ','-') }}">
                     <div class="turno-header">
                         <span>{{ turno }}</span>
-                        <!-- Suma Total Turno -->
-                        {% set ns = namespace(total_turno=0) %}
-                        {% for vendedor, items in tiradas_por_turno[turno] | groupby('vendedor') %}
-                             {% set ns.total_turno = ns.total_turno + (items | sum(attribute='monto')) %}
-                        {% endfor %}
-                        <span>$ {{ "{:,.0f}".format(ns.total_turno) }}</span>
+                        <span>$ {{ "{:,.0f}".format(lista_turno | sum(attribute='monto')) }}</span>
                     </div>
                     
-                    {% for vendedor, items in tiradas_por_turno[turno] | sort(attribute='vendedor') | groupby('vendedor') %}
-                        {% set total = items | sum(attribute='monto') %}
+                    {% for vendedor, items in lista_turno | sort(attribute='vendedor') | groupby('vendedor') %}
+                        {% set total_vendedor = items | sum(attribute='monto') %}
+                        {% set is_machine = 'buzon' in vendedor.lower() or 'caja' in vendedor.lower() %}
                         
-                        {% set is_machine = 'buzon' in vendedor.lower() or 'caja' in vendedor.lower() or 'interno' in vendedor.lower() %}
-                        
-                        <div>
-                            <div class="vendedor-header {% if is_machine %}is_machine{% endif %}" onclick="this.nextElementSibling.classList.toggle('active')">
+                        <div class="vendedor-block">
+                            <div class="vendedor-header {% if is_machine %}is_machine{% endif %}" onclick="this.nextElementSibling.classList.toggle('active'); this.classList.toggle('active');">
                                 <div>
                                     <span class="vh-name">{{ vendedor }}</span>
                                     <span class="vh-count">({{ items|length }} sobres)</span>
                                 </div>
-                                <span class="vh-total">$ {{ "{:,.2f}".format(total) }}</span>
+                                <span class="vh-total">$ {{ "{:,.2f}".format(total_vendedor) }}</span>
                             </div>
                             
                             <div class="vendedor-content">
@@ -164,9 +147,9 @@
                                     <thead>
                                         <tr>
                                             <th>Hora</th>
-                                            <th>Nombre CSV</th>
-                                            <th class="col-meta">Info Extra</th>
-                                            <th class="col-bills">Billetes</th>
+                                            <th>ID Transacción</th>
+                                            <th class="col-meta">DNI / Info</th>
+                                            <th class="col-bills">Desglose</th>
                                             <th>Monto</th>
                                         </tr>
                                     </thead>
@@ -174,19 +157,16 @@
                                         {% for t in items %}
                                         <tr>
                                             <td>{{ t.hora }}</td>
-                                            <td>{{ t.vendedor_raw }}</td>
+                                            <td>{{ t.transaccion }}</td>
                                             
                                             <td class="col-meta" style="font-size:0.8rem; color:#666;">
-                                                DNI: {{ t.dni }}<br>ID: {{ t.transaccion }}
+                                                DNI: {{ t.dni }}<br>CSV: {{ t.vendedor_raw }}
                                             </td>
                                             
                                             <td class="col-bills">
-                                                {% if t.b2000 > 0 %}<span class="bill-tag">$2000 x <span class="bill-val">{{ t.b2000 }}</span></span>{% endif %}
-                                                {% if t.b1000 > 0 %}<span class="bill-tag">$1000 x <span class="bill-val">{{ t.b1000 }}</span></span>{% endif %}
-                                                {% if t.b500 > 0 %}<span class="bill-tag">$500 x <span class="bill-val">{{ t.b500 }}</span></span>{% endif %}
-                                                {% if t.b200 > 0 %}<span class="bill-tag">$200 x <span class="bill-val">{{ t.b200 }}</span></span>{% endif %}
-                                                {% if t.b100 > 0 %}<span class="bill-tag">$100 x <span class="bill-val">{{ t.b100 }}</span></span>{% endif %}
-                                                {% if t.cant_billetes > 0 %}<span style="color:#888; font-size:0.75rem;">(Total: {{ t.cant_billetes }})</span>{% endif %}
+                                                {% if t.b2000 > 0 %}<span class="bill-tag">$2000: <span class="bill-val">{{ t.b2000 }}</span></span>{% endif %}
+                                                {% if t.b1000 > 0 %}<span class="bill-tag">$1000: <span class="bill-val">{{ t.b1000 }}</span></span>{% endif %}
+                                                {% if t.b500 > 0 %}<span class="bill-tag">$500: <span class="bill-val">{{ t.b500 }}</span></span>{% endif %}
                                             </td>
 
                                             <td style="color:#27ae60; font-weight:bold;">$ {{ "{:,.2f}".format(t.monto) }}</td>
@@ -203,29 +183,27 @@
 
         {% if not hay_datos %}
             <div style="text-align:center; padding:40px; color:#999; border: 2px dashed #ddd; border-radius:10px;">
-                <h3>📭 Sin datos para esta fecha</h3>
-                <p>Verifica la fecha seleccionada o solicita una carga nueva al Agente.</p>
+                <h3>📭 Sin movimientos hoy</h3>
+                <p>No se encontraron tiradas para la fecha seleccionada.</p>
             </div>
         {% endif %}
     </div>
 
     <script>
-        // --- VISTA DINÁMICA ---
+        // --- VISTA ---
         function toggleView() {
             const table = document.getElementById('mainTable');
             const showBills = document.getElementById('chkBills').checked;
             const showMeta = document.getElementById('chkMeta').checked;
-
             if (showBills) table.classList.add('show-bills'); else table.classList.remove('show-bills');
             if (showMeta) table.classList.add('show-meta'); else table.classList.remove('show-meta');
         }
 
-        // --- CONEXIÓN Y SOLICITUD ---
+        // --- CONEXION ---
         let isProcessing = false;
         
         function checkStatus() {
             if (isProcessing) return;
-            
             fetch('/api/estado-tiradas').then(r=>r.json()).then(data => {
                 const btn = document.getElementById('btnSolicitar');
                 const badge = document.getElementById('statusBadge');
@@ -234,78 +212,51 @@
 
                 if (data.online) {
                     badge.className = 'status-badge st-online'; 
-                    badge.innerHTML = '<span class="dot dot-green"></span> CONECTADO';
-                    
-                    // Si hay comando pendiente (está trabajando), bloqueamos
+                    badge.innerHTML = '<span class="dot dot-green"></span> ONLINE';
                     if (data.comando_pendiente) {
-                        btn.disabled = true;
-                        btn.style.backgroundColor = "#ccc";
-                        btn.innerText = "🔄 PROCESANDO...";
-                        msg.style.display = 'block';
-                        msg.innerText = "El agente está subiendo archivos...";
-                        isProcessing = true; // Bloqueamos la interfaz local
-                        waitForCompletion(); // Empezamos a vigilar
+                        btn.disabled = true; btn.style.background = "#ccc"; btn.innerText = "⏳ CARGANDO...";
+                        msg.style.display = 'block'; msg.innerText = "El agente está trabajando...";
+                        isProcessing = true; waitForCompletion();
                     } else {
-                        btn.disabled = false;
-                        btn.innerText = "INICIAR CARGA";
-                        btn.style.backgroundColor = "#e67e22";
+                        btn.disabled = false; btn.innerText = "INICIAR CARGA"; btn.style.background = "#e67e22";
                         msg.style.display = 'none';
                     }
                 } else {
-                    badge.className = 'status-badge st-offline'; 
-                    badge.innerHTML = '<span class="dot dot-red"></span> OFFLINE';
-                    btn.disabled = true;
-                    btn.innerText = "Esperando conexión...";
+                    badge.className = 'status-badge st-offline'; badge.innerHTML = '<span class="dot dot-red"></span> OFFLINE';
+                    btn.disabled = true; btn.innerText = "Esperando...";
                 }
             });
         }
 
         function solicitarRemoto() {
-            const fechaInicio = document.getElementById('fechaInicioCarga').value;
-            
-            if(!confirm(`¿Iniciar carga masiva desde el ${fechaInicio}?\n\nEl agente buscará todos los archivos posteriores a esa fecha.`)) return;
-
+            const f = document.getElementById('fechaInicioCarga').value;
+            if(!confirm(`¿Traer tiradas desde ${f}?`)) return;
             isProcessing = true;
-            const btn = document.getElementById('btnSolicitar');
-            const msg = document.getElementById('msgEstado');
+            document.getElementById('msgEstado').style.display='block';
+            document.getElementById('msgEstado').innerText="Enviando orden...";
             
-            btn.disabled = true;
-            btn.innerText = "📡 ENVIANDO...";
-            msg.style.display = 'block';
-            msg.innerText = "Contactando agente...";
-
-            // Enviamos fecha al backend
             fetch('/api/lanzar-tiradas', {
-                method:'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ fecha_inicio: fechaInicio })
-            }).then(r=>r.json()).then(d => {
-                if(d.status==='ok') {
-                    msg.innerText = "Orden recibida. El agente comenzará en breve.";
-                    waitForCompletion();
-                } else { 
-                    alert("Error al enviar orden"); 
-                    isProcessing = false; 
-                    checkStatus(); 
-                }
+                method:'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ fecha_inicio: f })
+            }).then(r=>r.json()).then(d=>{
+                if(d.status==='ok') waitForCompletion();
+                else isProcessing=false;
             });
         }
 
         function waitForCompletion() {
             const i = setInterval(() => {
                 fetch('/api/estado-tiradas').then(r=>r.json()).then(d => {
-                    // Si el comando se limpió, significa que el agente terminó
                     if (!d.comando_pendiente) {
                         clearInterval(i);
-                        document.getElementById('msgEstado').innerText = "✅ ¡Carga completada!";
                         isProcessing = false;
-                        setTimeout(() => window.location.reload(), 2000);
+                        location.reload();
                     }
                 });
             }, 3000);
         }
 
-        setInterval(checkStatus, 4000);
+        setInterval(checkStatus, 5000);
         checkStatus();
     </script>
 </body>
