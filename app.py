@@ -38,11 +38,11 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 # ==========================================
-# 🛠️ FUNCIONES AUXILIARES
+# 🛠️ FUNCIONES AUXILIARES (BLOQUE CORREGIDO)
 # ==========================================
 
 def calcular_info_operativa(fecha_hora_str):
-    """Calcula fecha operativa y turno basándose en la hora"""
+    """Calcula fecha operativa y turno basándose en la hora (IMPORTANTE: Para CSVs de Tiradas)"""
     try:
         dt = pd.to_datetime(fecha_hora_str)
         hora = dt.hour
@@ -58,79 +58,74 @@ def calcular_info_operativa(fecha_hora_str):
     except: 
         return datetime.now().strftime('%Y-%m-%d'), "Sin Asignar"
 
-def procesar_datos_turno(s):
-    """
-    Analiza el texto que viene de VOX y extrae fechas y horas reales.
-    Soporta formato simple: "Turno 1 - 29/11/2025"
-    Soporta formato complejo: "2025-11 (2025/11/29 05:45:56 - 2025/11/29 13:46:43)"
-    """
+def procesar_datos_turno_texto(s):
+    """Plan B: Usar regex sobre el texto si el ID falla (Para VOX)"""
     try:
         if not s: return None, None, None, None
-        
-        dt_cierre = None
-        dt_apertura = None
         fecha_obj = datetime.now().date()
-        turno = "Sin Asignar"
-
-        # 1. INTENTO DE EXTRACCIÓN DE RANGO HORARIO (Formato Complejo)
-        # Busca patrones tipo YYYY/MM/DD HH:MM:SS
-        patron_hora = r'(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})'
-        fechas_encontradas = re.findall(patron_hora, s)
         
-        if len(fechas_encontradas) >= 1:
-            try:
-                # La primera fecha encontrada es Apertura
-                dt_apertura = datetime.strptime(fechas_encontradas[0], '%Y/%m/%d %H:%M:%S')
-                
-                # La segunda (si existe) es Cierre. Si no, usamos la misma que apertura.
-                if len(fechas_encontradas) >= 2:
-                    dt_cierre = datetime.strptime(fechas_encontradas[1], '%Y/%m/%d %H:%M:%S')
-                else:
-                    dt_cierre = dt_apertura 
-                
-                # La fecha operativa se basa en el cierre.
-                # Si cerró antes de las 6 AM, pertenece al día anterior.
-                fecha_obj = dt_cierre.date()
-                if dt_cierre.hour < 6:
-                    fecha_obj = fecha_obj - timedelta(days=1)
-            except: pass
-        
-        # 2. INTENTO DE EXTRACCIÓN DE FECHA SIMPLE (Formato Corto)
-        # Si lo de arriba falló o no encontró horas, buscamos DD/MM/YYYY simple
-        if not dt_apertura:
-            match_simple = re.search(r'(\d{2})/(\d{2})/(\d{4})', s)
-            if match_simple:
-                d, m, a = match_simple.groups()
-                fecha_obj = datetime(int(a), int(m), int(d)).date()
-                # Inventamos horas para que la DB no falle
-                dt_apertura = datetime.combine(fecha_obj, time(6, 0)) 
-                dt_cierre = datetime.combine(fecha_obj, time(14, 0))
-
+        # Busca patrones DD/MM/YYYY o YYYY/MM/DD
+        match = re.search(r'(\d{2,4})[/-](\d{1,2})[/-](\d{2,4})', s)
+        if match:
+            partes = match.groups()
+            if len(partes[0]) == 4: # YYYY-MM-DD
+                fecha_obj = datetime(int(partes[0]), int(partes[1]), int(partes[2])).date()
+            else: # DD/MM/YYYY
+                fecha_obj = datetime(int(partes[2]), int(partes[1]), int(partes[0])).date()
+            
         fecha_sql = fecha_obj.strftime('%Y-%m-%d')
-
-        # 3. DETERMINAR TURNO
+        
         s_lower = s.lower()
-        
-        # Si tenemos hora real de cierre, calculamos el turno matemáticamente
-        if dt_cierre and len(fechas_encontradas) >= 1:
-            h = dt_cierre.hour
-            if 6 <= h < 14: turno = "Mañana"
-            elif 14 <= h < 22: turno = "Tarde"
-            else: turno = "Noche"
-        
-        # Pero si el texto dice explícitamente "Turno 1" o "Mañana", eso tiene prioridad
+        turno = "Sin Asignar"
         if "turno 1" in s_lower or "mañana" in s_lower: turno = "Mañana"
         elif "turno 2" in s_lower or "tarde" in s_lower: turno = "Tarde"
         elif "turno 3" in s_lower or "noche" in s_lower: turno = "Noche"
+        
+        # Horarios ficticios para relleno
+        now = datetime.now()
+        return fecha_sql, turno, now, now
+    except: return None, None, None, None
 
+def procesar_info_desde_id(id_vox, texto_original=""):
+    """
+    Plan A: Extrae la información EXACTA usando el ID de VOX (Para VOX).
+    Formato ID: AAAAMMDDHHMMSSAAAAMMDDHHMMSS (Inicio + Fin)
+    """
+    try:
+        # Si el ID es muy corto o nulo, usamos el texto como respaldo
+        if not id_vox or len(str(id_vox)) < 20:
+            return procesar_datos_turno_texto(texto_original)
+
+        id_str = str(id_vox).strip()
+        
+        # El ID son 2 fechas pegadas (14 chars cada una)
+        str_inicio = id_str[:14]
+        str_fin = id_str[14:]
+        
+        # Intentamos parsear con el formato compacto
+        dt_apertura = datetime.strptime(str_inicio, "%Y%m%d%H%M%S")
+        dt_cierre = datetime.strptime(str_fin, "%Y%m%d%H%M%S")
+        
+        # Fecha Operativa: Generalmente es la fecha de cierre. 
+        # Si cierra de madrugada (antes de las 06:00), pertenece al día anterior.
+        fecha_obj = dt_cierre.date()
+        if dt_cierre.hour < 6:
+            fecha_obj = fecha_obj - timedelta(days=1)
+            
+        fecha_sql = fecha_obj.strftime('%Y-%m-%d')
+        
+        # Calcular Turno por hora de CIERRE
+        h = dt_cierre.hour
+        turno = "Noche"
+        if 6 <= h < 14: turno = "Mañana"
+        elif 14 <= h < 22: turno = "Tarde"
+        
         return fecha_sql, turno, dt_cierre, dt_apertura
 
     except Exception as e:
-        print(f"❌ Error procesando string '{s}': {e}")
-        # Retorno de emergencia para no romper la base de datos
-        now = datetime.now()
-        return now.strftime('%Y-%m-%d'), "Error", now, now
-# ==========================================
+        print(f"❌ Error decodificando ID {id_vox}: {e}")
+        # Si falla el ID, intentamos leer el texto normal
+        return procesar_datos_turno_texto(texto_original)# ==========================================
 # 🗃️ MODELOS DE DATOS
 # ==========================================
 
@@ -406,39 +401,38 @@ def fin_tarea_tiradas():
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
-        # 1. Verificar Token
+        # 1. VERIFICAR TOKEN
         tk = request.headers.get('X-API-TOKEN')
         ch = Channel.query.filter_by(token=tk).first()
+        if not ch: return jsonify({"status":"error"}), 401
         
-        if not ch or ch.tipo != 'VOX': 
-            return jsonify({"status":"error", "msg":"Token invalido"}), 401
-        
-        # 2. Leer Datos
         n = request.json
-        nid = n.get('id_interno')
+        nid = str(n.get('id_interno'))
         u_id = ch.user_id 
         
-        print(f"📥 INTENTO DE CARGA: {n.get('fecha')} | Monto: {n.get('monto')}")
-        
-        # 3. Evitar duplicados (Si ya existe ese ID interno para ese usuario, ignorar)
+        # 2. FILTRO DE DUPLICADOS
+        # Si ya existe, NO guardamos, pero SÍ sumamos al contador de progreso
+        # para que la barra avance y no se quede trabada.
         if Reporte.query.filter_by(id_interno=nid, user_id=u_id).first(): 
-            print(f"   ⚠️ REPORTE DUPLICADO ({nid}). Ignorando.")
-            return jsonify({"status":"ignorado", "msg": "Ya existe"}), 200
+            if ESTADO_CARGA["activo"]:
+                ESTADO_CARGA["procesados"] += 1
+            print(f"   ⚠️ ID {nid} ya existe. Ignorando.")
+            return jsonify({"status":"ignorado"}), 200
         
-        # 4. Procesar Fecha con la nueva función
-        f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
+        # 3. PROCESAMIENTO DE FECHAS (Usando el ID para máxima precisión)
+        # Llama a la función 'procesar_info_desde_id' que agregamos antes
+        f_op, turno, dt_cierre, dt_apertura = procesar_info_desde_id(nid, n.get('fecha'))
         
-        if not f_op:
-            print("   ❌ Error: No se pudo calcular fecha operativa.")
+        if not f_op: 
             return jsonify({"status":"error_fecha"}), 400
         
-        # 5. Guardar en Base de Datos
+        # 4. GUARDAR EN BASE DE DATOS
         r = Reporte(
             user_id=u_id, 
             id_interno=nid, 
-            estacion=n.get('estacion'), 
+            estacion=n.get('estacion'),
             fecha_completa=n.get('fecha'), 
-            monto=n.get('monto'), 
+            monto=n.get('monto'),
             fecha_operativa=f_op, 
             turno=turno, 
             hora_cierre=dt_cierre, 
@@ -447,13 +441,46 @@ def api_reportar_vox():
         db.session.add(r)
         db.session.commit()
         
-        print(f"   ✅ REPORTE GUARDADO EXITOSAMENTE: {f_op} ({turno}) - ${n.get('monto')}")
+        # 5. ACTUALIZAR BARRA DE PROGRESO
+        if ESTADO_CARGA["activo"]:
+            ESTADO_CARGA["procesados"] += 1
+            ESTADO_CARGA["mensaje"] = f"Cargado: {f_op} ({turno})"
+        
+        print(f"   ✅ GUARDADO: {f_op} ({turno}) - ${n.get('monto')}")
         return jsonify({"status":"exito"}), 200
 
     except Exception as e:
-        print(f"🔥 ERROR CRÍTICO EN API REPORTAR: {e}")
-        traceback.print_exc() # Esto mostrará el error exacto en los logs de Render
+        print(f"🔥 ERROR API REPORTAR: {e}")
+        # En caso de error, no frenamos todo, solo reportamos fallo
         return jsonify({"status":"error", "msg": str(e)}), 500
+@app.route('/api/fin-tarea', methods=['POST'])
+def fin_tarea():
+    # El agente avisa que terminó
+    token = request.headers.get('X-API-TOKEN')
+    ch = Channel.query.filter_by(token=token).first()
+    if ch:
+        ch.comando = None
+        db.session.commit()
+        
+    ESTADO_CARGA["activo"] = False
+    ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
+    ESTADO_CARGA["procesados"] = ESTADO_CARGA["total_estimado"] # Forzar 100%
+    
+    return jsonify({"status": "ok"})
+
+@app.route('/api/estado-progreso')
+@login_required
+def estado_progreso():
+    # Calculamos porcentaje
+    pct = int((ESTADO_CARGA["procesados"] / ESTADO_CARGA["total_estimado"]) * 100)
+    if pct > 100: pct = 99 # Mantener en 99 hasta que llegue el fin-tarea
+    if not ESTADO_CARGA["activo"] and ESTADO_CARGA["mensaje"] == "✅ Carga Completa": pct = 100
+        
+    return jsonify({
+        "activo": ESTADO_CARGA["activo"],
+        "porcentaje": pct,
+        "mensaje": ESTADO_CARGA["mensaje"]
+    })
 @app.route('/api/ping-ui')
 @login_required
 def ping_ui():
@@ -580,32 +607,46 @@ def panel_estacion():
 def ver_reportes_html():
     return render_template('index.html', usuario=current_user.username)
 
+# ==========================================
+# 📊 CONTROL DE PROGRESO GLOBAL (Simple en memoria para este caso)
+# ==========================================
+# En un sistema multi-usuario idealmente esto iría en Redis o DB, 
+# pero para tu uso (una estación principal) esto funciona perfecto.
+ESTADO_CARGA = {
+    "activo": False,
+    "total_estimado": 1, # Evitar división por cero
+    "procesados": 0,
+    "mensaje": "Esperando...",
+    "inicio": None
+}
+
 @app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
-    # En lugar de buscar el "último + 1", definimos una VENTANA DE SEGURIDAD.
-    # Estrategia: Revisar siempre desde el día 1 del MES ANTERIOR hasta HOY.
-    
+    # 1. Definir Rango (Desde 1 Noviembre)
     hoy = datetime.now().date()
+    inicio = datetime(2024, 11, 1).date() # FECHA FIJA DE INICIO DE HISTORIAL
+    fin = hoy
     
-    # Calcular el primer día del mes actual
-    primer_dia_este_mes = hoy.replace(day=1)
+    dias_totales = (fin - inicio).days + 1
+    turnos_estimados = dias_totales * 3 # 3 turnos por día aprox
     
-    # Calcular el primer día del mes anterior (restando 1 día al 1ro de este mes)
-    ultimo_dia_mes_anterior = primer_dia_este_mes - timedelta(days=1)
-    primer_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
+    # 2. Resetear Estado
+    ESTADO_CARGA["activo"] = True
+    ESTADO_CARGA["total_estimado"] = turnos_estimados
+    ESTADO_CARGA["procesados"] = 0
+    ESTADO_CARGA["mensaje"] = "Iniciando agente..."
+    ESTADO_CARGA["inicio"] = datetime.now()
+
+    # 3. Enviar Orden al Agente
+    rango_inicio = inicio.strftime('%Y-%m-%d')
+    rango_fin = fin.strftime('%Y-%m-%d')
     
-    # RANGO DE BARRIDO: Desde 1ro mes anterior -> Hoy
-    # Ejemplo: Si hoy es 01/12/2025, busca desde 01/11/2025
-    rango_inicio = primer_dia_mes_anterior.strftime('%Y-%m-%d')
-    rango_fin = hoy.strftime('%Y-%m-%d')
-    
-    print(f"🔄 ORDEN DE BARRIDO: {rango_inicio} hasta {rango_fin}")
+    print(f"🔄 ORDEN MASIVA: {rango_inicio} al {rango_fin}")
 
     for ch in current_user.channels:
         if ch.tipo == 'VOX': 
             ch.comando = 'EXTRACT'
-            
             import json
             conf = {}
             if ch.config_data:
@@ -614,12 +655,10 @@ def lanzar_vox():
             
             conf['rango_inicio'] = rango_inicio
             conf['rango_fin'] = rango_fin
-            
             ch.config_data = json.dumps(conf)
 
     db.session.commit()
-    return jsonify({"status": "ok", "msg": f"Revisando desde {rango_inicio}..."})
-@app.route('/api/lanzar-tiradas', methods=['POST'])
+    return jsonify({"status": "ok"})@app.route('/api/lanzar-tiradas', methods=['POST'])
 # A. MODIFICAR: LANZAR TIRADAS (Ahora recibe fecha de filtro)
 # 1. MODIFICAR: LANZAR ORDEN (Ahora guarda la fecha que eliges en el calendario)
 @app.route('/api/lanzar-tiradas', methods=['POST'])
