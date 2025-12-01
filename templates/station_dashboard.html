@@ -5,70 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel de Estación</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; display: flex; justify-content: center; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 80vh; }
         
         .dashboard-container { 
-            background: white; width: 100%; max-width: 650px; padding: 30px; 
+            background: white; width: 100%; max-width: 600px; padding: 40px; 
             border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; 
         }
         
         h1 { color: #333; margin-bottom: 5px; }
         .subtitle { color: #666; margin-bottom: 30px; }
 
-        /* Botón de Configuración (Pequeño, arriba) */
+        /* Botón de Configuración (Discreto) */
         .btn-config { 
-            display: inline-block; padding: 10px 20px; margin-bottom: 20px;
+            display: inline-block; padding: 8px 15px; margin-bottom: 25px;
             background-color: #f8f9fa; color: #555; border: 1px solid #ddd;
-            border-radius: 20px; text-decoration: none; font-size: 0.9rem;
+            border-radius: 20px; text-decoration: none; font-size: 0.85rem;
             transition: 0.2s;
         }
         .btn-config:hover { background-color: #e2e6ea; }
 
-        /* BOTÓN DE EXTRACCIÓN (Destacado) */
-        .btn-extract { 
-            display: block; width: 100%; padding: 15px; margin: 10px 0 30px 0;
-            border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s; text-decoration: none;
-            background-color: #343a40; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .btn-extract:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); background-color: #23272b; }
-        .btn-extract:disabled { background-color: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
-
-        /* --- ESTILOS DE TARJETAS (Módulos) --- */
+        /* --- TARJETAS DE MÓDULOS --- */
         .modules-grid {
             display: flex; flex-direction: column; gap: 15px; text-align: left;
         }
 
         .dashboard-card {
             display: flex; align-items: center; text-decoration: none;
-            background: white; border-radius: 10px; padding: 15px 20px;
+            background: white; border-radius: 10px; padding: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #eee;
             border-left: 5px solid #ccc; transition: transform 0.2s, box-shadow 0.2s;
         }
-        .dashboard-card:hover { transform: translateX(5px); box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .dashboard-card:hover { transform: translateX(5px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
 
-        .card-icon { font-size: 2rem; margin-right: 15px; min-width: 40px; text-align: center; }
-        .card-content h3 { margin: 0 0 4px 0; font-size: 1.1rem; color: #2c3e50; }
-        .card-content p { margin: 0; font-size: 0.85rem; color: #7f8c8d; }
+        .card-icon { font-size: 2rem; margin-right: 20px; min-width: 40px; text-align: center; }
+        .card-content h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #2c3e50; }
+        .card-content p { margin: 0; font-size: 0.9rem; color: #7f8c8d; }
 
-        /* Colores específicos de tarjetas */
+        /* Colores de Tarjetas */
         .card-cyan { border-left-color: #17a2b8; }   /* Ventas */
         .card-purple { border-left-color: #8e44ad; } /* Tiradas */
         .card-blue { border-left-color: #007bff; }   /* Reportes */
 
-        /* Barra de Progreso */
-        #progress-container { display: none; margin: 20px 0; text-align: left; }
-        .progress-bar-bg { background-color: #e9ecef; border-radius: 10px; height: 20px; overflow: hidden; }
-        .progress-bar-fill {
-            height: 100%; background-color: #007bff; width: 0%;
-            transition: width 0.5s ease;
-            background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
-            background-size: 1rem 1rem;
-            animation: progress-bar-stripes 1s linear infinite;
-        }
-        @keyframes progress-bar-stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
-        
-        .status-text { margin-top: 10px; font-size: 14px; color: #555; font-weight: bold; }
         .logout { margin-top: 30px; display: inline-block; color: #dc3545; text-decoration: none; font-size: 14px; font-weight: 500; }
         .logout:hover { text-decoration: underline; }
     </style>
@@ -79,18 +56,7 @@
         <h1>Hola, {{ user.username }}</h1>
         <p class="subtitle">Panel de Control de Estación</p>
 
-        <a href="/estacion/config-vox" class="btn-config">⚙️ Configurar VOX</a>
-
-        <button id="btnExtract" onclick="iniciarExtraccion()" class="btn-extract">
-            ⬇️ EXTRAER DATOS DEL SURTIDOR
-        </button>
-
-        <div id="progress-container">
-            <div class="progress-bar-bg">
-                <div id="pBar" class="progress-bar-fill"></div>
-            </div>
-            <div id="pText" class="status-text">Iniciando...</div>
-        </div>
+        <a href="/estacion/config-vox" class="btn-config">⚙️ Configurar Conexión VOX</a>
 
         <div class="modules-grid">
             
@@ -106,7 +72,7 @@
                 <div class="card-icon">💸</div>
                 <div class="card-content">
                     <h3>Control de Tiradas</h3>
-                    <p>Cargar sobres (CSV) y ver acreditaciones.</p>
+                    <p>Ver sobres (CSV) y controlar efectivo.</p>
                 </div>
             </a>
 
@@ -114,7 +80,7 @@
                 <div class="card-icon">📊</div>
                 <div class="card-content">
                     <h3>Gráficos y Reportes</h3>
-                    <p>Ver histórico de cierres y litros despachados.</p>
+                    <p>Ver histórico de cierres y actualizar datos.</p>
                 </div>
             </a>
 
@@ -123,111 +89,5 @@
         <a href="/logout" class="logout">Cerrar Sesión</a>
     </div>
 
-    <script>
-        let intervalId = null;
-
-        window.onload = function() {
-            if (localStorage.getItem('extracting') === 'true') {
-                restaurarEstadoExtraccion();
-            }
-        };
-
-        function restaurarEstadoExtraccion() {
-            const btn = document.getElementById('btnExtract');
-            const pContainer = document.getElementById('progress-container');
-            
-            btn.disabled = true;
-            btn.innerHTML = "⏳ Extracción en curso...";
-            pContainer.style.display = 'block';
-            
-            intervalId = setInterval(verificarEstado, 2000);
-        }
-
-        function iniciarExtraccion() {
-            const btn = document.getElementById('btnExtract');
-            if (btn.disabled) return;
-
-            localStorage.setItem('extracting', 'true');
-            
-            btn.disabled = true;
-            btn.innerHTML = "⏳ Enviando orden...";
-            
-            document.getElementById('progress-container').style.display = 'block';
-            document.getElementById('pBar').style.width = '5%';
-            document.getElementById('pText').innerText = "Contactando a la PC...";
-
-            fetch('/api/lanzar-orden', { method: 'POST' })
-                .then(() => {
-                    if (!intervalId) intervalId = setInterval(verificarEstado, 2000);
-                })
-                .catch(err => {
-                    console.error(err);
-                    alert("Error de conexión");
-                    resetearEstado();
-                });
-        }
-
-        async function verificarEstado() {
-            try {
-                const res = await fetch('/api/ping-ui');
-                const data = await res.json();
-                
-                const pBar = document.getElementById('pBar');
-                const pText = document.getElementById('pText');
-                
-                if (data.cmd === true) {
-                    pText.innerText = "Esperando que la PC inicie la descarga...";
-                    if(parseInt(pBar.style.width) < 30) pBar.style.width = '30%';
-                
-                } else {
-                    let currentWidth = parseInt(pBar.style.width);
-                    if (currentWidth < 90) {
-                        pBar.style.width = (currentWidth + 10) + '%';
-                        pText.innerText = "Subiendo reportes a la nube... (" + currentWidth + "%)";
-                    } else {
-                        finalizarExtraccion();
-                    }
-                }
-
-                if (data.st === 'offline') {
-                    pText.innerText = "⚠️ Error: La PC se desconectó.";
-                    pText.style.color = "red";
-                    resetearEstado();
-                }
-
-            } catch (error) {
-                console.error(error);
-            }
-        }
-
-        function finalizarExtraccion() {
-            const pBar = document.getElementById('pBar');
-            const pText = document.getElementById('pText');
-            const btn = document.getElementById('btnExtract');
-
-            clearInterval(intervalId);
-            localStorage.removeItem('extracting'); 
-
-            pBar.style.width = '100%';
-            pBar.style.backgroundColor = '#28a745';
-            pText.innerText = "✅ ¡Carga Completa!";
-            pText.style.color = "green";
-            
-            btn.innerHTML = "✅ PROCESO FINALIZADO";
-            
-            setTimeout(() => {
-                // Redirigir a reportes tras éxito
-                window.location.href = "/estacion/ver-reportes";
-            }, 2000);
-        }
-
-        function resetearEstado() {
-            localStorage.removeItem('extracting');
-            clearInterval(intervalId);
-            const btn = document.getElementById('btnExtract');
-            btn.disabled = false;
-            btn.innerHTML = "⬇️ EXTRAER DATOS DEL SURTIDOR";
-        }
-    </script>
 </body>
 </html>
