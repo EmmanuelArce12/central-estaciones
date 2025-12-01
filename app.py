@@ -60,45 +60,76 @@ def calcular_info_operativa(fecha_hora_str):
 
 def procesar_datos_turno(s):
     """
-    Procesa el string que envía el Agente VOX.
-    Busca patrones de fecha y palabras clave de turno.
+    Analiza el texto que viene de VOX y extrae fechas y horas reales.
+    Soporta formato simple: "Turno 1 - 29/11/2025"
+    Soporta formato complejo: "2025-11 (2025/11/29 05:45:56 - 2025/11/29 13:46:43)"
     """
     try:
         if not s: return None, None, None, None
         
-        # 1. Buscar fecha (DD/MM/YYYY o YYYY-MM-DD)
-        # Busca algo como 29/11/2025 o 2025-11-29
-        match = re.search(r'(\d{2,4})[/-](\d{1,2})[/-](\d{2,4})', s)
-        
-        if match:
-            partes = match.groups()
-            # Lógica simple: si el primer grupo es largo (2025) es año, si no es día
-            if len(partes[0]) == 4:
-                fecha_obj = datetime(int(partes[0]), int(partes[1]), int(partes[2])).date()
-            else:
-                fecha_obj = datetime(int(partes[2]), int(partes[1]), int(partes[0])).date()
-        else:
-            # Si dice "Turno Actual" o no hay fecha, usamos HOY
-            fecha_obj = datetime.now().date()
-            
-        fecha_sql = fecha_obj.strftime('%Y-%m-%d')
-        
-        # 2. Determinar Turno
-        s_lower = s.lower()
+        dt_cierre = None
+        dt_apertura = None
+        fecha_obj = datetime.now().date()
         turno = "Sin Asignar"
+
+        # 1. INTENTO DE EXTRACCIÓN DE RANGO HORARIO (Formato Complejo)
+        # Busca patrones tipo YYYY/MM/DD HH:MM:SS
+        patron_hora = r'(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})'
+        fechas_encontradas = re.findall(patron_hora, s)
         
+        if len(fechas_encontradas) >= 1:
+            try:
+                # La primera fecha encontrada es Apertura
+                dt_apertura = datetime.strptime(fechas_encontradas[0], '%Y/%m/%d %H:%M:%S')
+                
+                # La segunda (si existe) es Cierre. Si no, usamos la misma que apertura.
+                if len(fechas_encontradas) >= 2:
+                    dt_cierre = datetime.strptime(fechas_encontradas[1], '%Y/%m/%d %H:%M:%S')
+                else:
+                    dt_cierre = dt_apertura 
+                
+                # La fecha operativa se basa en el cierre.
+                # Si cerró antes de las 6 AM, pertenece al día anterior.
+                fecha_obj = dt_cierre.date()
+                if dt_cierre.hour < 6:
+                    fecha_obj = fecha_obj - timedelta(days=1)
+            except: pass
+        
+        # 2. INTENTO DE EXTRACCIÓN DE FECHA SIMPLE (Formato Corto)
+        # Si lo de arriba falló o no encontró horas, buscamos DD/MM/YYYY simple
+        if not dt_apertura:
+            match_simple = re.search(r'(\d{2})/(\d{2})/(\d{4})', s)
+            if match_simple:
+                d, m, a = match_simple.groups()
+                fecha_obj = datetime(int(a), int(m), int(d)).date()
+                # Inventamos horas para que la DB no falle
+                dt_apertura = datetime.combine(fecha_obj, time(6, 0)) 
+                dt_cierre = datetime.combine(fecha_obj, time(14, 0))
+
+        fecha_sql = fecha_obj.strftime('%Y-%m-%d')
+
+        # 3. DETERMINAR TURNO
+        s_lower = s.lower()
+        
+        # Si tenemos hora real de cierre, calculamos el turno matemáticamente
+        if dt_cierre and len(fechas_encontradas) >= 1:
+            h = dt_cierre.hour
+            if 6 <= h < 14: turno = "Mañana"
+            elif 14 <= h < 22: turno = "Tarde"
+            else: turno = "Noche"
+        
+        # Pero si el texto dice explícitamente "Turno 1" o "Mañana", eso tiene prioridad
         if "turno 1" in s_lower or "mañana" in s_lower: turno = "Mañana"
         elif "turno 2" in s_lower or "tarde" in s_lower: turno = "Tarde"
         elif "turno 3" in s_lower or "noche" in s_lower: turno = "Noche"
-        
-        # 3. Horarios ficticios (VOX resumen no manda hora exacta)
-        dt_base = datetime.combine(fecha_obj, time(0,0))
-        
-        return fecha_sql, turno, dt_base, dt_base
+
+        return fecha_sql, turno, dt_cierre, dt_apertura
 
     except Exception as e:
         print(f"❌ Error procesando string '{s}': {e}")
-        return datetime.now().strftime('%Y-%m-%d'), "Error", datetime.now(), datetime.now()
+        # Retorno de emergencia para no romper la base de datos
+        now = datetime.now()
+        return now.strftime('%Y-%m-%d'), "Error", now, now
 # ==========================================
 # 🗃️ MODELOS DE DATOS
 # ==========================================
@@ -395,20 +426,21 @@ def api_reportar_vox():
         nid = n.get('id_interno')
         u_id = ch.user_id 
         
-        print(f"📥 RECIBIENDO: {n.get('fecha')} - Monto: {n.get('monto')}") # Debug en consola
+        print(f"📥 INTENTO DE CARGA: {n.get('fecha')} | Monto: {n.get('monto')}")
         
         # 3. Evitar duplicados (Si ya existe ese ID interno para ese usuario, ignorar)
         if Reporte.query.filter_by(id_interno=nid, user_id=u_id).first(): 
-            print("⚠️ Reporte duplicado, ignorando.")
+            print(f"   ⚠️ REPORTE DUPLICADO ({nid}). Ignorando.")
             return jsonify({"status":"ignorado", "msg": "Ya existe"}), 200
         
-        # 4. Procesar Fecha
+        # 4. Procesar Fecha con la nueva función
         f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
         
-        if not f_op: 
+        if not f_op:
+            print("   ❌ Error: No se pudo calcular fecha operativa.")
             return jsonify({"status":"error_fecha"}), 400
         
-        # 5. Guardar
+        # 5. Guardar en Base de Datos
         r = Reporte(
             user_id=u_id, 
             id_interno=nid, 
@@ -423,14 +455,13 @@ def api_reportar_vox():
         db.session.add(r)
         db.session.commit()
         
-        print(f"✅ REPORTE GUARDADO: {f_op} ({turno}) - ${n.get('monto')}")
+        print(f"   ✅ REPORTE GUARDADO EXITOSAMENTE: {f_op} ({turno}) - ${n.get('monto')}")
         return jsonify({"status":"exito"}), 200
 
     except Exception as e:
-        print(f"🔥 ERROR EN API REPORTAR: {e}")
-        traceback.print_exc()
+        print(f"🔥 ERROR CRÍTICO EN API REPORTAR: {e}")
+        traceback.print_exc() # Esto mostrará el error exacto en los logs de Render
         return jsonify({"status":"error", "msg": str(e)}), 500
-
 @app.route('/api/ping-ui')
 @login_required
 def ping_ui():
