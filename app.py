@@ -40,6 +40,46 @@ login_manager.login_view = 'login'
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES (BLOQUE CORREGIDO)
 # ==========================================
+def get_rango_barrido_seguro():
+    """
+    Calcula el rango de fechas para barrer.
+    Si la base de datos está vacía, devuelve por defecto desde el 1 de Noviembre.
+    """
+    try:
+        # Intentamos buscar el último reporte
+        # (Esto puede fallar si la tabla no existe o está vacía, por eso el try/except)
+        ultimo = Reporte.query.filter_by(user_id=current_user.id).order_by(Reporte.fecha_operativa.desc()).first()
+        
+        hoy = datetime.now().date()
+        
+        if ultimo and ultimo.fecha_operativa:
+            # Si hay datos, buscamos desde el día siguiente al último guardado
+            try:
+                ultima_fecha = datetime.strptime(ultimo.fecha_operativa, '%Y-%m-%d').date()
+                inicio = ultima_fecha
+                # Si el último guardado es muy viejo (más de 2 meses), forzamos barrido reciente
+                # para no matar al agente buscando años de historia
+                limite_atras = hoy - timedelta(days=60)
+                if inicio < limite_atras:
+                    inicio = limite_atras
+            except:
+                # Si la fecha en DB está corrupta, usar default
+                inicio = datetime(2024, 11, 1).date()
+        else:
+            # CASO TABLA VACÍA: Empezar desde 1 de Noviembre 2024
+            inicio = datetime(2024, 11, 1).date()
+            
+        # Siempre asegurar que 'inicio' sea el primer día de ese mes para barrer completo
+        # Ej: Si el último fue el 15/11, igual revisamos desde el 01/11 por seguridad
+        inicio_mes = inicio.replace(day=1)
+        
+        return inicio_mes.strftime('%Y-%m-%d'), hoy.strftime('%Y-%m-%d')
+
+    except Exception as e:
+        print(f"⚠️ Error calculando fechas: {e}")
+        # Fallback de emergencia: Hoy
+        h = datetime.now().strftime('%Y-%m-%d')
+        return h, h
 
 def calcular_info_operativa(fecha_hora_str):
     """Calcula fecha operativa y turno basándose en la hora (IMPORTANTE: Para CSVs de Tiradas)"""
@@ -623,42 +663,40 @@ ESTADO_CARGA = {
 @app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
-    # 1. Definir Rango (Desde 1 Noviembre)
-    hoy = datetime.now().date()
-    inicio = datetime(2024, 11, 1).date() # FECHA FIJA DE INICIO DE HISTORIAL
-    fin = hoy
-    
-    dias_totales = (fin - inicio).days + 1
-    turnos_estimados = dias_totales * 3 # 3 turnos por día aprox
-    
-    # 2. Resetear Estado
-    ESTADO_CARGA["activo"] = True
-    ESTADO_CARGA["total_estimado"] = turnos_estimados
-    ESTADO_CARGA["procesados"] = 0
-    ESTADO_CARGA["mensaje"] = "Iniciando agente..."
-    ESTADO_CARGA["inicio"] = datetime.now()
+    try:
+        # Usamos la nueva función segura
+        rango_inicio, rango_fin = get_rango_barrido_seguro()
+        
+        # 1. Resetear Estado de Progreso (Para la barra visual)
+        ESTADO_CARGA["activo"] = True
+        ESTADO_CARGA["procesados"] = 0
+        ESTADO_CARGA["mensaje"] = f"Iniciando barrido desde {rango_inicio}..."
+        ESTADO_CARGA["total_estimado"] = 50 # Número dummy para que la barra se mueva
+        
+        print(f"🔄 ORDEN BARRIDO: {rango_inicio} al {rango_fin}")
 
-    # 3. Enviar Orden al Agente
-    rango_inicio = inicio.strftime('%Y-%m-%d')
-    rango_fin = fin.strftime('%Y-%m-%d')
-    
-    print(f"🔄 ORDEN MASIVA: {rango_inicio} al {rango_fin}")
+        for ch in current_user.channels:
+            if ch.tipo == 'VOX': 
+                ch.comando = 'EXTRACT'
+                
+                import json
+                conf = {}
+                if ch.config_data:
+                    try: conf = json.loads(ch.config_data)
+                    except: pass
+                
+                conf['rango_inicio'] = rango_inicio
+                conf['rango_fin'] = rango_fin
+                
+                ch.config_data = json.dumps(conf)
 
-    for ch in current_user.channels:
-        if ch.tipo == 'VOX': 
-            ch.comando = 'EXTRACT'
-            import json
-            conf = {}
-            if ch.config_data:
-                try: conf = json.loads(ch.config_data)
-                except: pass
-            
-            conf['rango_inicio'] = rango_inicio
-            conf['rango_fin'] = rango_fin
-            ch.config_data = json.dumps(conf)
+        db.session.commit()
+        return jsonify({"status": "ok", "msg": f"Buscando desde {rango_inicio}"})
 
-    db.session.commit()
-    return jsonify({"status": "ok"})@app.route('/api/lanzar-tiradas', methods=['POST'])
+    except Exception as e:
+        print(f"🔥 Error 500 en lanzar-orden: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "msg": str(e)}), 500
 # A. MODIFICAR: LANZAR TIRADAS (Ahora recibe fecha de filtro)
 # 1. MODIFICAR: LANZAR ORDEN (Ahora guarda la fecha que eliges en el calendario)
 @app.route('/api/lanzar-tiradas', methods=['POST'])
