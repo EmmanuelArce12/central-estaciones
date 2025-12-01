@@ -12,131 +12,188 @@
         .header-actions { display: flex; gap: 10px; }
         
         .btn-back { text-decoration: none; background-color: #6c757d; color: white; padding: 8px 15px; border-radius: 6px; font-weight: bold; font-size: 0.9rem; }
-        .btn-back:hover { background-color: #5a6268; }
+        .btn-conf { text-decoration: none; background-color: #343a40; color: white; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 1.2rem; }
         
-        /* BOTÓN CONFIGURAR (NUEVO AQUÍ) */
-        .btn-conf { text-decoration: none; background-color: #343a40; color: white; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; }
-        .btn-conf:hover { background-color: #23272b; }
-
-        /* BOTÓN ACTUALIZAR */
-        .btn-sync { background-color: #e67e22; color: white; border: none; padding: 8px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 0.9rem; transition: 0.2s; }
+        /* BOTÓN ACTUALIZAR GRANDE */
+        .btn-sync { background-color: #e67e22; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 0.9rem; transition: 0.2s; }
         .btn-sync:hover { background-color: #d35400; }
-        .btn-sync:disabled { background-color: #ccc; cursor: wait; }
-        .spin { animation: rotation 1s infinite linear; }
-        @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
+        .btn-sync:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* BARRA DE PROGRESO */
+        #progress-container { display: none; margin: 20px 0; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .progress-bar-bg { background-color: #e9ecef; border-radius: 10px; height: 20px; overflow: hidden; width: 100%; }
+        .progress-bar-fill {
+            height: 100%; background-color: #007bff; width: 0%;
+            transition: width 0.5s ease;
+            background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+            background-size: 1rem 1rem; animation: stripes 1s linear infinite;
+        }
+        @keyframes stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+        .status-text { margin-top: 10px; font-size: 0.9rem; color: #555; font-weight: bold; text-align: center; }
 
         .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
         input[type="date"] { padding: 10px; font-size: 1.1rem; border-radius: 6px; border: 1px solid #ccc; }
-        button.btn-search { padding: 10px 25px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
-        button.btn-search:hover { background: #3498db; }
-        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .btn-search { padding: 10px 25px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
         
-        .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; overflow: hidden; border-top: 5px solid #ccc; animation: fadeIn 0.5s ease-in-out; }
+        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #ccc; animation: fadeIn 0.5s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
-        .card.Mañana { border-top-color: #f1c40f; }
-        .card.Tarde { border-top-color: #e67e22; }
-        .card.Noche { border-top-color: #2c3e50; }
-
-        .card h2 { margin-top: 0; margin-bottom: 5px; font-size: 1.4rem; color: #555; display: flex; justify-content: space-between; }
-        .card .icono { font-size: 1.5rem; }
-        
-        .cierres-count { font-size: 0.9rem; color: #888; margin-bottom: 15px; font-weight: 600; }
+        .card.Mañana { border-top-color: #f1c40f; } .card.Tarde { border-top-color: #e67e22; } .card.Noche { border-top-color: #2c3e50; }
+        .card h2 { margin: 0 0 5px 0; font-size: 1.4rem; color: #555; display: flex; justify-content: space-between; }
         .monto-grande { font-size: 2rem; font-weight: bold; color: #27ae60; margin: 15px 0; }
         .info-extra { background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 0.9rem; color: #666; }
-        .etiqueta { font-weight: bold; color: #555; display: block; margin-bottom: 3px; }
-        .horario { color: #333; font-family: monospace; font-size: 1rem; }
     </style>
 </head>
 <body>
 
     <div class="header">
         <div class="header-actions">
-            <a href="/estacion/panel" class="btn-back">⬅️ Volver</a>
-            <a href="/estacion/config-vox" class="btn-conf" title="Configurar Conexión">⚙️</a>
-            
-            <button id="btnSync" class="btn-sync" onclick="sincronizarDatos()">
-                <span id="iconSync">🔄</span> Actualizar Datos
-            </button>
+            <a href="/estacion/panel" class="btn-back">⬅️ Panel</a>
+            <a href="/estacion/config-vox" class="btn-conf" title="Configurar Conexión VOX">⚙️</a>
         </div>
-        <h1>📊 Reporte: {{ usuario }}</h1>
+        
+        <button id="btnSync" class="btn-sync" onclick="iniciarSincronizacion()">
+            🔄 ACTUALIZAR DATOS
+        </button>
+    </div>
+    
+    <h1 style="text-align:center; margin-bottom:20px;">Reporte: {{ usuario }}</h1>
+
+    <div id="progress-container">
+        <div class="progress-bar-bg">
+            <div id="pBar" class="progress-bar-fill"></div>
+        </div>
+        <div id="pText" class="status-text">Iniciando conexión...</div>
     </div>
 
     <div class="search-box">
         <input type="date" id="fechaSelector">
-        <button class="btn-search" onclick="cargarResumen()">Ver Reporte</button>
+        <button class="btn-search" onclick="cargarResumen()">Ver Fecha</button>
     </div>
-
-    <div id="msgSync" style="text-align:center; color:#e67e22; margin-bottom:10px; font-weight:bold; display:none;"></div>
 
     <div id="dashboard" class="dashboard">
         <div style="grid-column: 1/-1; text-align: center; color:#888; margin-top: 20px;">
-            Selecciona una fecha arriba para cargar los datos.
+            Selecciona una fecha arriba para ver los datos.
         </div>
     </div>
 
     <script>
         const formatMoney = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
         const iconos = { "Mañana": "🌅", "Tarde": "☀️", "Noche": "🌙" };
+        let intervalId = null;
 
-        async function sincronizarDatos() {
+        // --- LÓGICA DE BARRA DE PROGRESO ---
+        function iniciarSincronizacion() {
+            if(!confirm("¿Solicitar datos faltantes al sistema?\n(Busca desde el último turno guardado)")) return;
+
             const btn = document.getElementById('btnSync');
-            const icon = document.getElementById('iconSync');
-            const msg = document.getElementById('msgSync');
+            btn.disabled = true; 
+            btn.innerText = "⏳ EN PROCESO...";
 
-            if(!confirm("¿Solicitar datos faltantes?\nEsto buscará desde el último turno cargado.")) return;
+            document.getElementById('progress-container').style.display = 'block';
+            document.getElementById('pBar').style.width = '5%';
+            document.getElementById('pText').innerText = "Contactando Agente en PC...";
+            document.getElementById('pText').style.color = "#555";
 
-            btn.disabled = true; icon.classList.add('spin');
-            msg.style.display = 'block'; msg.innerText = "📡 Contactando Agente...";
-
-            try {
-                const res = await fetch('/api/lanzar-orden', { method: 'POST' });
-                const data = await res.json();
-                
-                if(data.status === 'ok') {
-                    msg.innerText = "✅ Orden enviada. Los datos llegarán en breve.";
-                    setTimeout(() => { msg.style.display = 'none'; btn.disabled = false; icon.classList.remove('spin'); cargarResumen(); }, 5000);
-                } else { alert("Error"); btn.disabled = false; icon.classList.remove('spin'); }
-            } catch (e) { alert("Error de conexión"); btn.disabled = false; icon.classList.remove('spin'); }
+            // 1. Lanzar Orden
+            fetch('/api/lanzar-orden', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if(data.status === 'ok') {
+                        // 2. Empezar a vigilar el estado
+                        intervalId = setInterval(verificarProgreso, 2000);
+                    } else {
+                        alert("Error al iniciar orden");
+                        resetUI();
+                    }
+                })
+                .catch(err => { alert("Error de conexión"); resetUI(); });
         }
 
+        async function verificarProgreso() {
+            try {
+                const res = await fetch('/api/ping-ui');
+                const data = await res.json();
+                const pBar = document.getElementById('pBar');
+                const pText = document.getElementById('pText');
+
+                if (data.st === 'offline') {
+                    pText.innerText = "⚠️ Error: La PC se desconectó.";
+                    pText.style.color = "red";
+                    clearInterval(intervalId);
+                    setTimeout(resetUI, 3000);
+                    return;
+                }
+
+                if (data.cmd === true) {
+                    // El agente tiene la orden pero aun no termina
+                    pText.innerText = "La PC está extrayendo datos de VOX...";
+                    let w = parseInt(pBar.style.width);
+                    if(w < 90) pBar.style.width = (w + 5) + "%";
+                } else {
+                    // Ya no hay comando pendiente -> Terminó
+                    clearInterval(intervalId);
+                    pBar.style.width = "100%";
+                    pBar.style.backgroundColor = "#28a745";
+                    pText.innerText = "✅ ¡Datos Actualizados!";
+                    pText.style.color = "green";
+                    
+                    setTimeout(() => {
+                        resetUI();
+                        // Cargar automáticamente la fecha de hoy
+                        document.getElementById('fechaSelector').valueAsDate = new Date();
+                        cargarResumen();
+                    }, 2000);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function resetUI() {
+            const btn = document.getElementById('btnSync');
+            btn.disabled = false;
+            btn.innerText = "🔄 ACTUALIZAR DATOS";
+            document.getElementById('progress-container').style.display = 'none';
+            document.getElementById('pBar').style.width = '0%';
+            document.getElementById('pBar').style.backgroundColor = "#007bff";
+            if(intervalId) clearInterval(intervalId);
+        }
+
+        // --- LÓGICA DE CARGA DE REPORTES ---
         async function cargarResumen() {
             const fecha = document.getElementById('fechaSelector').value;
             const dashboard = document.getElementById('dashboard');
             if(!fecha) return alert("Selecciona fecha");
 
-            dashboard.innerHTML = '<p style="text-align:center; width:100%; color:#666;">⏳ Cargando...</p>';
+            dashboard.innerHTML = '<p style="text-align:center; width:100%;">⏳ Cargando...</p>';
 
             try {
                 const res = await fetch(`/api/resumen-dia/${fecha}`);
                 const datos = await res.json();
-                dashboard.innerHTML = ''; 
-                
+                dashboard.innerHTML = '';
+
                 if (datos.length === 0) {
-                    dashboard.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #777;"><h3>📭 Sin movimientos</h3><p>No se encontraron datos.</p></div>';
+                    dashboard.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Sin movimientos</h3></div>';
                     return;
                 }
 
-                let totalDia = 0;
-                datos.forEach(turno => {
-                    totalDia += turno.monto;
-                    const card = document.createElement('div');
-                    card.className = `card ${turno.turno}`;
-                    card.innerHTML = `
-                        <h2>${turno.turno} <span class="icono">${iconos[turno.turno] || ''}</span></h2>
-                        <div class="cierres-count">📠 ${turno.cantidad_cierres} Cierres</div>
-                        <div class="monto-grande">${formatMoney(turno.monto)}</div>
-                        <div class="info-extra"><span class="etiqueta">Horario:</span><span class="horario">🕒 ${turno.horario_real}</span></div>
-                    `;
-                    dashboard.appendChild(card);
+                let total = 0;
+                datos.forEach(t => {
+                    total += t.monto;
+                    const c = document.createElement('div');
+                    c.className = `card ${t.turno}`;
+                    c.innerHTML = `<h2>${t.turno} <span style="font-size:1.5rem">${iconos[t.turno]||''}</span></h2>
+                                   <div style="font-weight:600;color:#888;margin-bottom:15px">📠 ${t.cantidad_cierres} Cierres</div>
+                                   <div class="monto-grande">${formatMoney(t.monto)}</div>
+                                   <div class="info-extra">🕒 ${t.horario_real}</div>`;
+                    dashboard.appendChild(c);
                 });
 
-                const cardTotal = document.createElement('div');
-                cardTotal.className = 'card'; cardTotal.style.borderTopColor = '#27ae60';
-                cardTotal.innerHTML = `<h2>TOTAL DÍA 💰</h2><div class="monto-grande" style="color:#27ae60">${formatMoney(totalDia)}</div>`;
-                dashboard.appendChild(cardTotal);
-
-            } catch (e) { dashboard.innerHTML = '<p style="color:red; text-align:center">Error.</p>'; }
+                const cTot = document.createElement('div');
+                cTot.className = 'card'; cTot.style.borderTopColor='#27ae60';
+                cTot.innerHTML = `<h2>TOTAL DÍA 💰</h2><div class="monto-grande" style="color:#27ae60">${formatMoney(total)}</div>`;
+                dashboard.appendChild(cTot);
+            } catch(e) { dashboard.innerHTML='<p style="color:red;text-align:center">Error</p>'; }
         }
         
         document.getElementById('fechaSelector').valueAsDate = new Date();

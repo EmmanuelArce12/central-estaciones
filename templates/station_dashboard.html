@@ -6,88 +6,39 @@
     <title>Panel de Estación</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 80vh; }
-        
-        .dashboard-container { 
-            background: white; width: 100%; max-width: 600px; padding: 40px; 
-            border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; 
-        }
-        
+        .dashboard-container { background: white; width: 100%; max-width: 600px; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; }
         h1 { color: #333; margin-bottom: 5px; }
         .subtitle { color: #666; margin-bottom: 30px; }
-
-        /* Botón de Configuración (Discreto) */
-        .btn-config { 
-            display: inline-block; padding: 8px 15px; margin-bottom: 25px;
-            background-color: #f8f9fa; color: #555; border: 1px solid #ddd;
-            border-radius: 20px; text-decoration: none; font-size: 0.85rem;
-            transition: 0.2s;
-        }
-        .btn-config:hover { background-color: #e2e6ea; }
-
-        /* --- TARJETAS DE MÓDULOS --- */
-        .modules-grid {
-            display: flex; flex-direction: column; gap: 15px; text-align: left;
-        }
-
-        .dashboard-card {
-            display: flex; align-items: center; text-decoration: none;
-            background: white; border-radius: 10px; padding: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #eee;
-            border-left: 5px solid #ccc; transition: transform 0.2s, box-shadow 0.2s;
-        }
+        .modules-grid { display: flex; flex-direction: column; gap: 15px; text-align: left; }
+        .dashboard-card { display: flex; align-items: center; text-decoration: none; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #eee; border-left: 5px solid #ccc; transition: transform 0.2s, box-shadow 0.2s; }
         .dashboard-card:hover { transform: translateX(5px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-
         .card-icon { font-size: 2rem; margin-right: 20px; min-width: 40px; text-align: center; }
         .card-content h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #2c3e50; }
         .card-content p { margin: 0; font-size: 0.9rem; color: #7f8c8d; }
-
-        /* Colores de Tarjetas */
-        .card-cyan { border-left-color: #17a2b8; }   /* Ventas */
-        .card-purple { border-left-color: #8e44ad; } /* Tiradas */
-        .card-blue { border-left-color: #007bff; }   /* Reportes */
-
+        .card-cyan { border-left-color: #17a2b8; } .card-purple { border-left-color: #8e44ad; } .card-blue { border-left-color: #007bff; }
         .logout { margin-top: 30px; display: inline-block; color: #dc3545; text-decoration: none; font-size: 14px; font-weight: 500; }
         .logout:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
-
     <div class="dashboard-container">
         <h1>Hola, {{ user.username }}</h1>
         <p class="subtitle">Panel de Control de Estación</p>
-
-        <a href="/estacion/config-vox" class="btn-config">⚙️ Configurar Conexión VOX</a>
-
         <div class="modules-grid">
-            
             <a href="/estacion/ventas-vendedor" class="dashboard-card card-cyan">
                 <div class="card-icon">👨‍⚕️</div>
-                <div class="card-content">
-                    <h3>Ventas por Vendedor</h3>
-                    <p>Cargar Excel de ventas y asignar por turno.</p>
-                </div>
+                <div class="card-content"><h3>Ventas por Vendedor</h3><p>Cargar Excel de ventas.</p></div>
             </a>
-
             <a href="/estacion/tiradas" class="dashboard-card card-purple">
                 <div class="card-icon">💸</div>
-                <div class="card-content">
-                    <h3>Control de Tiradas</h3>
-                    <p>Ver sobres (CSV) y controlar efectivo.</p>
-                </div>
+                <div class="card-content"><h3>Control de Tiradas</h3><p>Control de sobres y efectivo.</p></div>
             </a>
-
             <a href="/estacion/ver-reportes" class="dashboard-card card-blue">
                 <div class="card-icon">📊</div>
-                <div class="card-content">
-                    <h3>Gráficos y Reportes</h3>
-                    <p>Ver histórico de cierres y actualizar datos.</p>
-                </div>
+                <div class="card-content"><h3>Gráficos y Reportes</h3><p>Historial y actualización de datos.</p></div>
             </a>
-
         </div>
-
         <a href="/logout" class="logout">Cerrar Sesión</a>
     </div>
-
 </body>
 </html>

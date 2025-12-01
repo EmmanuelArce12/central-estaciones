@@ -6,6 +6,7 @@ import json
 import random
 import io
 import traceback # Nuevo para ver errores reales
+import re
 from collections import Counter
 from sqlalchemy import func
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
@@ -58,36 +59,46 @@ def calcular_info_operativa(fecha_hora_str):
         return datetime.now().strftime('%Y-%m-%d'), "Sin Asignar"
 
 def procesar_datos_turno(s):
-    """Procesa strings complejos del reporte VOX"""
+    """
+    Procesa el string que envía el Agente VOX.
+    Busca patrones de fecha y palabras clave de turno.
+    """
     try:
-        if '(' not in s:
-            return calcular_info_operativa(s) + (None, None)
-
-        contenido = s.split('(')[1].replace(')', '') 
-        partes = contenido.split(' - ')
-        str_apertura = partes[0].strip()
-        str_cierre = partes[1].strip()
+        if not s: return None, None, None, None
         
-        for fmt in ["%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M:%S"]:
-            try:
-                dt_apertura = datetime.strptime(str_apertura, fmt)
-                dt_cierre = datetime.strptime(str_cierre, fmt)
-                break
-            except: continue
+        # 1. Buscar fecha (DD/MM/YYYY o YYYY-MM-DD)
+        # Busca algo como 29/11/2025 o 2025-11-29
+        match = re.search(r'(\d{2,4})[/-](\d{1,2})[/-](\d{2,4})', s)
         
-        h = dt_cierre.hour
-        fecha_obj = dt_cierre.date()
-        turno = "Noche"
-        
-        if 6 <= h < 14: turno = "Mañana"
-        elif 14 <= h < 22: turno = "Tarde"
+        if match:
+            partes = match.groups()
+            # Lógica simple: si el primer grupo es largo (2025) es año, si no es día
+            if len(partes[0]) == 4:
+                fecha_obj = datetime(int(partes[0]), int(partes[1]), int(partes[2])).date()
+            else:
+                fecha_obj = datetime(int(partes[2]), int(partes[1]), int(partes[0])).date()
         else:
-            if h < 6: fecha_obj = fecha_obj - timedelta(days=1)
+            # Si dice "Turno Actual" o no hay fecha, usamos HOY
+            fecha_obj = datetime.now().date()
+            
+        fecha_sql = fecha_obj.strftime('%Y-%m-%d')
         
-        return fecha_obj.strftime("%Y-%m-%d"), turno, dt_cierre, dt_apertura
-    except: 
-        return datetime.now().strftime("%Y-%m-%d"), "Error", datetime.now(), datetime.now()
+        # 2. Determinar Turno
+        s_lower = s.lower()
+        turno = "Sin Asignar"
+        
+        if "turno 1" in s_lower or "mañana" in s_lower: turno = "Mañana"
+        elif "turno 2" in s_lower or "tarde" in s_lower: turno = "Tarde"
+        elif "turno 3" in s_lower or "noche" in s_lower: turno = "Noche"
+        
+        # 3. Horarios ficticios (VOX resumen no manda hora exacta)
+        dt_base = datetime.combine(fecha_obj, time(0,0))
+        
+        return fecha_sql, turno, dt_base, dt_base
 
+    except Exception as e:
+        print(f"❌ Error procesando string '{s}': {e}")
+        return datetime.now().strftime('%Y-%m-%d'), "Error", datetime.now(), datetime.now()
 # ==========================================
 # 🗃️ MODELOS DE DATOS
 # ==========================================
@@ -372,17 +383,53 @@ def fin_tarea_tiradas():
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
+        # 1. Verificar Token
         tk = request.headers.get('X-API-TOKEN')
         ch = Channel.query.filter_by(token=tk).first()
-        if not ch or ch.tipo != 'VOX': return jsonify({"status":"error", "msg":"Token invalido"}), 401
-        n = request.json; nid = n.get('id_interno'); u_id = ch.user_id 
-        if Reporte.query.filter_by(id_interno=nid, user_id=u.id).first(): return jsonify({"status":"ignorado"}), 200
+        
+        if not ch or ch.tipo != 'VOX': 
+            return jsonify({"status":"error", "msg":"Token invalido"}), 401
+        
+        # 2. Leer Datos
+        n = request.json
+        nid = n.get('id_interno')
+        u_id = ch.user_id 
+        
+        print(f"📥 RECIBIENDO: {n.get('fecha')} - Monto: {n.get('monto')}") # Debug en consola
+        
+        # 3. Evitar duplicados (Si ya existe ese ID interno para ese usuario, ignorar)
+        if Reporte.query.filter_by(id_interno=nid, user_id=u_id).first(): 
+            print("⚠️ Reporte duplicado, ignorando.")
+            return jsonify({"status":"ignorado", "msg": "Ya existe"}), 200
+        
+        # 4. Procesar Fecha
         f_op, turno, dt_cierre, dt_apertura = procesar_datos_turno(n.get('fecha'))
-        if not f_op: return jsonify({"status":"error_fecha"}), 400
-        r = Reporte(user_id=u_id, id_interno=nid, estacion=n.get('estacion'), fecha_completa=n.get('fecha'), monto=n.get('monto'), fecha_operativa=f_op, turno=turno, hora_cierre=dt_cierre, hora_apertura=dt_apertura)
-        db.session.add(r); db.session.commit()
+        
+        if not f_op: 
+            return jsonify({"status":"error_fecha"}), 400
+        
+        # 5. Guardar
+        r = Reporte(
+            user_id=u_id, 
+            id_interno=nid, 
+            estacion=n.get('estacion'), 
+            fecha_completa=n.get('fecha'), 
+            monto=n.get('monto'), 
+            fecha_operativa=f_op, 
+            turno=turno, 
+            hora_cierre=dt_cierre, 
+            hora_apertura=dt_apertura
+        )
+        db.session.add(r)
+        db.session.commit()
+        
+        print(f"✅ REPORTE GUARDADO: {f_op} ({turno}) - ${n.get('monto')}")
         return jsonify({"status":"exito"}), 200
-    except Exception as e: return jsonify({"status":"error", "msg": str(e)}), 500
+
+    except Exception as e:
+        print(f"🔥 ERROR EN API REPORTAR: {e}")
+        traceback.print_exc()
+        return jsonify({"status":"error", "msg": str(e)}), 500
 
 @app.route('/api/ping-ui')
 @login_required

@@ -5,132 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Configuración VOX</title>
     <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background-color: #f0f2f5; 
-            display: flex; 
-            justify-content: center; 
-            padding-top: 50px; 
-            margin: 0;
-        }
-        .card { 
-            background: white; 
-            padding: 30px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1); 
-            width: 90%; 
-            max-width: 450px; 
-        }
-        h2 { 
-            text-align: center; 
-            color: #333; 
-            margin-bottom: 20px; 
-            margin-top: 0;
-        }
-        
-        /* ESTILOS DEL SEMÁFORO */
-        .status-box {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 25px;
-            font-weight: bold;
-            text-align: center;
-        }
-        .online { 
-            background-color: #d4edda; 
-            color: #155724; 
-            border: 1px solid #c3e6cb; 
-        }
-        .offline { 
-            background-color: #f8d7da; 
-            color: #721c24; 
-            border: 1px solid #f5c6cb; 
-        }
-        .dot { 
-            height: 12px; 
-            width: 12px; 
-            border-radius: 50%; 
-            display: inline-block; 
-            margin-bottom: 5px;
-        }
-        .dot-green { 
-            background-color: #28a745; 
-            box-shadow: 0 0 8px #28a745; 
-        }
-        .dot-red { 
-            background-color: #dc3545; 
-        }
-
-        /* FORMULARIO */
-        label { 
-            font-weight: 600; 
-            color: #555; 
-            display: block; 
-            margin-top: 15px; 
-        }
-        input[type="text"] { 
-            width: 100%; 
-            padding: 12px; 
-            margin-top: 5px; 
-            border: 1px solid #ccc; 
-            border-radius: 6px; 
-            box-sizing: border-box; 
-            font-size: 14px;
-        }
-        input[type="text"]:focus {
-            border-color: #007bff;
-            outline: none;
-        }
-
-        button { 
-            width: 100%; 
-            background-color: #007bff; 
-            color: white; 
-            padding: 14px; 
-            border: none; 
-            border-radius: 6px; 
-            font-size: 16px; 
-            cursor: pointer; 
-            transition: background 0.3s; 
-            margin-top: 25px;
-            font-weight: bold;
-        }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; padding-top: 50px; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 90%; max-width: 450px; }
+        h2 { text-align: center; color: #333; margin-top: 0; }
+        .status-box { display: flex; flex-direction: column; align-items: center; padding: 15px; border-radius: 8px; margin-bottom: 25px; font-weight: bold; text-align: center; }
+        .online { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .offline { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-bottom: 5px; }
+        .dot-green { background-color: #28a745; box-shadow: 0 0 8px #28a745; }
+        .dot-red { background-color: #dc3545; }
+        label { font-weight: 600; color: #555; display: block; margin-top: 15px; }
+        input[type="text"] { width: 100%; padding: 12px; margin-top: 5px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; background-color: #007bff; color: white; padding: 14px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; margin-top: 25px; font-weight: bold; }
         button:hover { background-color: #0056b3; }
-        
-        .btn-warning {
-            background-color: #ffc107;
-            color: #212529;
-        }
+        .btn-warning { background-color: #ffc107; color: #212529; }
         .btn-warning:hover { background-color: #e0a800; }
-
-        .back-link { 
-            display: block; 
-            text-align: center; 
-            margin-top: 20px; 
-            color: #666; 
-            text-decoration: none; 
-            font-size: 14px;
-        }
-        .back-link:hover { color: #333; }
-
-        .msg {
-            text-align: center;
-            margin-bottom: 15px;
-            padding: 10px;
-            border-radius: 4px;
-            font-size: 14px;
-        }
+        
+        /* BOTÓN VOLVER */
+        .back-link { display: block; text-align: center; margin-top: 20px; color: #666; text-decoration: none; font-size: 14px; }
+        .back-link:hover { color: #333; font-weight: bold; }
+        
+        .msg { text-align: center; margin-bottom: 15px; padding: 10px; border-radius: 4px; font-size: 14px; }
         .msg-success { color: #155724; background-color: #d4edda; border: 1px solid #c3e6cb;}
         .msg-error { color: #721c24; background-color: #f8d7da; border: 1px solid #f5c6cb;}
-
     </style>
 </head>
 <body>
-
     <div class="card">
         <h2>📡 Conexión VOX</h2>
 
@@ -142,39 +42,30 @@
         {% else %}
             <div class="status-box offline">
                 <div><span class="dot dot-red"></span> PC DESCONECTADA</div>
-                <small style="font-weight:normal; margin-top:5px">
-                    Última vez vista: {{ last_seen }}
-                </small>
+                <small style="font-weight:normal; margin-top:5px">Última vez vista: {{ last_seen }}</small>
             </div>
         {% endif %}
 
         {% if msg %}
-            <div class="msg {% if 'Error' in msg or '⚠️' in msg %}msg-error{% else %}msg-success{% endif %}">
-                {{ msg }}
-            </div>
+            <div class="msg {% if 'Error' in msg or '⚠️' in msg %}msg-error{% else %}msg-success{% endif %}">{{ msg }}</div>
         {% endif %}
 
-        <form method="POST" action="/estacion/config-vox">
+        <form method="POST">
             <label for="ip">IP del Servidor VOX:</label>
             <input type="text" id="ip" name="ip" value="{{ cred.vox_ip }}" placeholder="Ej: 192.168.1.100" required>
-
             <label for="u">Usuario VOX:</label>
-            <input type="text" id="u" name="u" value="{{ cred.vox_usuario }}" placeholder="Usuario del sistema" required>
-
+            <input type="text" id="u" name="u" value="{{ cred.vox_usuario }}" required>
             <label for="p">Contraseña VOX:</label>
-            <input type="text" id="p" name="p" value="{{ cred.vox_clave }}" placeholder="Contraseña del sistema" required>
+            <input type="text" id="p" name="p" value="{{ cred.vox_clave }}" required>
 
             {% if is_online %}
                 <button type="submit">🚀 GUARDAR Y ENVIAR A LA PC</button>
             {% else %}
-                <button type="submit" class="btn-warning" title="Se guardará pero no se enviará hasta que conecte">
-                    💾 GUARDAR (EN ESPERA)
-                </button>
+                <button type="submit" class="btn-warning">💾 GUARDAR (EN ESPERA)</button>
             {% endif %}
         </form>
 
-        <a href="/estacion/panel" class="back-link">Volver al Panel Principal</a>
+        <a href="/estacion/ver-reportes" class="back-link">⬅️ Volver a Reportes</a>
     </div>
-
 </body>
 </html>
