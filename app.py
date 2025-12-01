@@ -477,15 +477,15 @@ def lanzar_vox():
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_tiradas():
-    # Recibimos la fecha del frontend (si no envían nada, usa 2025-01-01)
+    # Recibimos la fecha del frontend (tu HTML envía {fecha_inicio: "YYYY-MM-DD"})
     data = request.json or {}
-    fecha_filtro = data.get('fecha_inicio', '2025-01-01')
+    fecha_filtro = data.get('fecha_inicio', '2025-01-01') # Si falla, usa una por defecto
 
     for ch in current_user.channels:
         if ch.tipo == 'TIRADAS': 
             ch.comando = 'UPLOAD_TIRADAS'
             
-            # Guardamos la fecha en la configuración del canal
+            # Guardamos la fecha en la configuración del canal para que el Python la lea
             import json
             conf = {}
             if ch.config_data:
@@ -493,10 +493,10 @@ def lanzar_tiradas():
                 except: pass
             
             conf['filtro_fecha'] = fecha_filtro
-            ch.config_data = json.dumps(conf)
+            ch.config_data = jso<n.dumps(conf)
 
     db.session.commit()
-    return jsonify({"status": "ok"})@app.route('/api/estado-tiradas')
+    return jsonify({"status": "ok"})
 @login_required
 def estado_tiradas():
     online = False
