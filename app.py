@@ -311,34 +311,27 @@ def admin_status_all():
         data.append({"id": u.id, "username": u.username, "cliente": u.cliente_info.nombre_fantasia if u.cliente_info else "-", "channels": channels_data})
     return jsonify(data)
 
-# 2. AUTO-SCHEDULER: Disparar extracción automática VOX
+# ---------------------------------------------------------
+# 2. TAREA AUTOMÁTICA (Misma lógica de barrido)
+# ---------------------------------------------------------
 @app.route('/api/agent/trigger-auto', methods=['POST'])
 def trigger_auto_agente():
-    # 1. Validar Token del Agente
     token = request.headers.get('X-API-TOKEN')
     ch = Channel.query.filter_by(token=token).first()
     
     if not ch or ch.tipo != 'VOX': 
         return jsonify({"status": "error", "msg": "Token invalido"}), 401
     
-    # 2. Calcular Fechas (Igual que en 'lanzar_vox' pero usando ch.user_id)
-    ultimo_reporte = Reporte.query.filter_by(user_id=ch.user_id).order_by(Reporte.fecha_operativa.desc()).first()
+    # LÓGICA DE BARRIDO DE SEGURIDAD (Igual que arriba)
     hoy = datetime.now().date()
+    primer_dia_este_mes = hoy.replace(day=1)
+    ultimo_dia_mes_anterior = primer_dia_este_mes - timedelta(days=1)
+    primer_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
     
-    if ultimo_reporte and ultimo_reporte.fecha_operativa:
-        try:
-            ultima_fecha = datetime.strptime(ultimo_reporte.fecha_operativa, '%Y-%m-%d').date()
-            fecha_inicio = ultima_fecha + timedelta(days=1)
-        except: fecha_inicio = hoy
-    else:
-        fecha_inicio = hoy - timedelta(days=3)
-
-    if fecha_inicio > hoy: fecha_inicio = hoy # Nunca futuro
-
-    rango_inicio = fecha_inicio.strftime('%Y-%m-%d')
+    rango_inicio = primer_dia_mes_anterior.strftime('%Y-%m-%d')
     rango_fin = hoy.strftime('%Y-%m-%d')
     
-    # 3. Guardar Orden en el Canal
+    # Guardar orden
     ch.comando = 'EXTRACT'
     
     import json
@@ -353,10 +346,9 @@ def trigger_auto_agente():
     ch.config_data = json.dumps(conf)
     db.session.commit()
     
-    print(f"🤖 AUTO-SCHEDULER: Orden creada para {ch.nombre} (Desde {rango_inicio})")
+    print(f"🤖 AUTO-SCHEDULER ({ch.nombre}): Barrido desde {rango_inicio}")
     
-    return jsonify({"status": "ok", "msg": "Tarea programada"})
-
+    return jsonify({"status": "ok", "msg": "Barrido programado"})
 # ==========================================
 # 📡 APIS COMUNICACIÓN
 # ==========================================
@@ -591,52 +583,42 @@ def ver_reportes_html():
 @app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
-    # 1. Buscamos la última fecha cargada en la DB para este usuario
-    # Ordenamos descendente y tomamos la primera
-    ultimo_reporte = Reporte.query.filter_by(user_id=current_user.id).order_by(Reporte.fecha_operativa.desc()).first()
-
+    # En lugar de buscar el "último + 1", definimos una VENTANA DE SEGURIDAD.
+    # Estrategia: Revisar siempre desde el día 1 del MES ANTERIOR hasta HOY.
+    
     hoy = datetime.now().date()
     
-    if ultimo_reporte and ultimo_reporte.fecha_operativa:
-        try:
-            # Si el último fue el 25/11, queremos empezar desde el 26/11
-            ultima_fecha = datetime.strptime(ultimo_reporte.fecha_operativa, '%Y-%m-%d').date()
-            fecha_inicio = ultima_fecha + timedelta(days=1)
-        except:
-            fecha_inicio = hoy
-    else:
-        # Si la base está vacía, traemos, por ejemplo, los últimos 3 días por defecto
-        fecha_inicio = hoy - timedelta(days=3)
+    # Calcular el primer día del mes actual
+    primer_dia_este_mes = hoy.replace(day=1)
+    
+    # Calcular el primer día del mes anterior (restando 1 día al 1ro de este mes)
+    ultimo_dia_mes_anterior = primer_dia_este_mes - timedelta(days=1)
+    primer_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
+    
+    # RANGO DE BARRIDO: Desde 1ro mes anterior -> Hoy
+    # Ejemplo: Si hoy es 01/12/2025, busca desde 01/11/2025
+    rango_inicio = primer_dia_mes_anterior.strftime('%Y-%m-%d')
+    rango_fin = hoy.strftime('%Y-%m-%d')
+    
+    print(f"🔄 ORDEN DE BARRIDO: {rango_inicio} hasta {rango_fin}")
 
-    # Si la fecha de inicio es mayor a hoy (ej: ya cargó hoy), no hacemos nada o forzamos hoy por si acaso
-    if fecha_inicio > hoy:
-        fecha_inicio = hoy
-
-    fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
-    fecha_fin_str = hoy.strftime('%Y-%m-%d')
-
-    print(f"🔄 Ordenando carga desde {fecha_inicio_str} hasta {fecha_fin_str}")
-
-    # 2. Guardamos la orden en el canal VOX
     for ch in current_user.channels:
         if ch.tipo == 'VOX': 
             ch.comando = 'EXTRACT'
             
-            # Guardamos el rango de fechas en la config para que el agente sepa qué buscar
             import json
             conf = {}
             if ch.config_data:
                 try: conf = json.loads(ch.config_data)
                 except: pass
             
-            conf['rango_inicio'] = fecha_inicio_str
-            conf['rango_fin'] = fecha_fin_str
+            conf['rango_inicio'] = rango_inicio
+            conf['rango_fin'] = rango_fin
             
             ch.config_data = json.dumps(conf)
 
     db.session.commit()
-    return jsonify({"status": "ok", "msg": f"Solicitando datos desde {fecha_inicio_str}"})
-
+    return jsonify({"status": "ok", "msg": f"Revisando desde {rango_inicio}..."})
 @app.route('/api/lanzar-tiradas', methods=['POST'])
 # A. MODIFICAR: LANZAR TIRADAS (Ahora recibe fecha de filtro)
 # 1. MODIFICAR: LANZAR ORDEN (Ahora guarda la fecha que eliges en el calendario)
