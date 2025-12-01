@@ -40,47 +40,40 @@ login_manager.login_view = 'login'
 # ==========================================
 # 🛠️ FUNCIONES AUXILIARES (BLOQUE CORREGIDO)
 # ==========================================
+# ==========================================
+# 🛡️ CÁLCULO DE FECHAS SEGURO (A PRUEBA DE VACÍO)
+# ==========================================
 def get_rango_barrido_seguro():
-    """
-    Calcula el rango de fechas para barrer.
-    Si la base de datos está vacía, devuelve por defecto desde el 1 de Noviembre.
-    """
     try:
-        # Intentamos buscar el último reporte
-        # (Esto puede fallar si la tabla no existe o está vacía, por eso el try/except)
+        # 1. Intentar obtener el último reporte
         ultimo = Reporte.query.filter_by(user_id=current_user.id).order_by(Reporte.fecha_operativa.desc()).first()
         
         hoy = datetime.now().date()
         
         if ultimo and ultimo.fecha_operativa:
-            # Si hay datos, buscamos desde el día siguiente al último guardado
             try:
-                ultima_fecha = datetime.strptime(ultimo.fecha_operativa, '%Y-%m-%d').date()
-                inicio = ultima_fecha
-                # Si el último guardado es muy viejo (más de 2 meses), forzamos barrido reciente
-                # para no matar al agente buscando años de historia
-                limite_atras = hoy - timedelta(days=60)
-                if inicio < limite_atras:
-                    inicio = limite_atras
+                # Si hay datos, empezamos desde la última fecha registrada
+                inicio = datetime.strptime(ultimo.fecha_operativa, '%Y-%m-%d').date()
             except:
-                # Si la fecha en DB está corrupta, usar default
+                # Si la fecha guardada es inválida, fallback
                 inicio = datetime(2024, 11, 1).date()
         else:
-            # CASO TABLA VACÍA: Empezar desde 1 de Noviembre 2024
+            # 2. SI LA TABLA ESTÁ VACÍA (Tu caso actual)
+            # Forzamos inicio el 1 de Noviembre 2024
             inicio = datetime(2024, 11, 1).date()
             
-        # Siempre asegurar que 'inicio' sea el primer día de ese mes para barrer completo
-        # Ej: Si el último fue el 15/11, igual revisamos desde el 01/11 por seguridad
+        # Truco: Siempre retrocedemos al día 1 de ESE mes para barrer completo
+        # Ej: Si el último fue el 28/11, volvemos al 01/11 para re-chequear huecos
         inicio_mes = inicio.replace(day=1)
         
+        # Formatear strings
         return inicio_mes.strftime('%Y-%m-%d'), hoy.strftime('%Y-%m-%d')
 
     except Exception as e:
-        print(f"⚠️ Error calculando fechas: {e}")
-        # Fallback de emergencia: Hoy
-        h = datetime.now().strftime('%Y-%m-%d')
-        return h, h
-
+        print(f"⚠️ Error fatal calculando fechas: {e}")
+        # En el peor de los casos, devolvemos el mes actual completo
+        inicio = datetime.now().date().replace(day=1)
+        return inicio.strftime('%Y-%m-%d'), datetime.now().strftime('%Y-%m-%d')
 def calcular_info_operativa(fecha_hora_str):
     """Calcula fecha operativa y turno basándose en la hora (IMPORTANTE: Para CSVs de Tiradas)"""
     try:
@@ -664,21 +657,20 @@ ESTADO_CARGA = {
 @login_required
 def lanzar_vox():
     try:
-        # Usamos la nueva función segura
+        # Usamos la función segura
         rango_inicio, rango_fin = get_rango_barrido_seguro()
         
-        # 1. Resetear Estado de Progreso (Para la barra visual)
+        # Configurar barra de progreso
         ESTADO_CARGA["activo"] = True
         ESTADO_CARGA["procesados"] = 0
-        ESTADO_CARGA["mensaje"] = f"Iniciando barrido desde {rango_inicio}..."
-        ESTADO_CARGA["total_estimado"] = 50 # Número dummy para que la barra se mueva
+        ESTADO_CARGA["mensaje"] = f"Iniciando: {rango_inicio}..."
+        ESTADO_CARGA["total_estimado"] = 60 # Estimativo para la animación
         
-        print(f"🔄 ORDEN BARRIDO: {rango_inicio} al {rango_fin}")
+        print(f"🔄 ORDEN LANZADA: {rango_inicio} al {rango_fin}")
 
         for ch in current_user.channels:
             if ch.tipo == 'VOX': 
                 ch.comando = 'EXTRACT'
-                
                 import json
                 conf = {}
                 if ch.config_data:
@@ -687,12 +679,14 @@ def lanzar_vox():
                 
                 conf['rango_inicio'] = rango_inicio
                 conf['rango_fin'] = rango_fin
-                
                 ch.config_data = json.dumps(conf)
 
         db.session.commit()
-        return jsonify({"status": "ok", "msg": f"Buscando desde {rango_inicio}"})
+        return jsonify({"status": "ok"})
 
+    except Exception as e:
+        print(f"🔥 Error 500 lanzar-orden: {e}")
+        return jsonify({"status": "error", "msg": str(e)}), 500
     except Exception as e:
         print(f"🔥 Error 500 en lanzar-orden: {e}")
         traceback.print_exc()
