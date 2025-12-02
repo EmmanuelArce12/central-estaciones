@@ -854,16 +854,22 @@ def lanzar_vox():
     except Exception as e:
         print(f"🔥 Error 500: {e}")
         return jsonify({"status": "error", "msg": str(e)}), 500
+# ==========================================
+# 🚀 CORRECCIÓN: AGREGAR RUTAS (@app.route)
+# ==========================================
+
+@app.route('/api/lanzar-tiradas', methods=['POST']) # <--- FALTABA ESTO
+@login_required
 def lanzar_tiradas():
-    # Recibimos la fecha del frontend (tu HTML envía {fecha_inicio: "YYYY-MM-DD"})
+    # Recibimos la fecha del frontend
     data = request.json or {}
-    fecha_filtro = data.get('fecha_inicio', '2025-01-01') # Si falla, usa una por defecto
+    fecha_filtro = data.get('fecha_inicio', '2025-01-01') 
 
     for ch in current_user.channels:
-        if ch.tipo == 'TIRADAS': 
+        # Usamos .upper() para evitar problemas de mayúsculas/minúsculas
+        if ch.tipo and ch.tipo.upper() == 'TIRADAS': 
             ch.comando = 'UPLOAD_TIRADAS'
             
-            # Guardamos la fecha en la configuración del canal para que el Python la lea
             import json
             conf = {}
             if ch.config_data:
@@ -871,30 +877,30 @@ def lanzar_tiradas():
                 except: pass
             
             conf['filtro_fecha'] = fecha_filtro
-            ch.config_data = jso<n.dumps(conf)
+            # CORREGIDO: Decía 'jso<n.dumps' (error de dedo)
+            ch.config_data = json.dumps(conf)
 
     db.session.commit()
     return jsonify({"status": "ok"})
-@app.route('/api/estado-tiradas')
+
+@app.route('/api/estado-tiradas') # <--- FALTABA ESTO PARA EL ERROR 404
 @login_required
 def estado_tiradas():
     online = False
     last = "-"
+    cmd_pendiente = False
+    
     for ch in current_user.channels:
-        # CORRECCIÓN: Usamos .upper() para ignorar mayúsculas/minúsculas
         if ch.tipo and ch.tipo.upper() == 'TIRADAS':
-            # Chequeo de tiempo (600 segundos = 10 minutos)
+            # Consideramos online si reportó en los últimos 10 minutos
             if ch.last_check and (datetime.now() - ch.last_check).total_seconds() < 600:
                 online = True
                 last = ch.last_check.strftime("%H:%M:%S")
+            
+            # Verificamos si está ocupado trabajando
+            if ch.comando == 'UPLOAD_TIRADAS':
+                cmd_pendiente = True
                 
-    # También devolvemos si hay un comando pendiente para bloquear el botón
-    cmd_pendiente = False
-    # Buscamos de nuevo para ver si hay comando (puedes optimizar esto, pero así es claro)
-    for ch in current_user.channels:
-        if ch.tipo and ch.tipo.upper() == 'TIRADAS' and ch.comando == 'UPLOAD_TIRADAS':
-            cmd_pendiente = True
-
     return jsonify({"online": online, "ultima_vez": last, "comando_pendiente": cmd_pendiente})
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
