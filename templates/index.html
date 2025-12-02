@@ -171,43 +171,52 @@
             }
         }
 
+        // EN INDEX.HTML (Reemplaza la función verificarEstadoCarga completa)
+
         function verificarEstadoCarga() {
             fetch('/api/estado-progreso')
                 .then(r => r.json())
                 .then(d => {
-                    // PARCHE DE SEGURIDAD:
-                    // Si el mensaje dice "Completa", asumimos éxito aunque d.activo sea true
-                    const tareaTerminada = d.mensaje && d.mensaje.includes("Completa");
+                    // DETECCIÓN INTELIGENTE DE FIN
+                    // Si el porcentaje es 100 O el mensaje dice "Completa", es un éxito,
+                    // sin importar si 'd.activo' es true o false.
+                    const esFinExitoso = (d.porcentaje >= 100) || (d.mensaje && d.mensaje.includes("Completa"));
 
-                    if (d.activo && !tareaTerminada) {
-                        // Sigue trabajando...
+                    if (d.activo && !esFinExitoso) {
+                        // Sigue trabajando normalmente
                         setEstadoBoton(true);
                         document.getElementById('progress-panel').style.display = 'block';
                         actualizarBarra(d.porcentaje, d.mensaje);
-                        if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
+                        
+                        // Nos aseguramos de seguir preguntando
+                        if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1000);
                     
-                    } else if (d.porcentaje === 100 || tareaTerminada) {
-                        // ÉXITO (Llegó al 100% O el mensaje dice Completa)
+                    } else if (esFinExitoso) {
+                        // CASO DE ÉXITO: Forzamos el 100% visual y recargamos
                         actualizarBarra(100, "✅ Carga Completa");
                         
-                        // Pequeña pausa para ver el 100% y recargar
+                        // Frenamos el intervalo para no preguntar más
+                        if(pollInterval) clearInterval(pollInterval);
+                        pollInterval = null;
+
+                        // Esperamos 1 segundo para que el usuario vea el verde y recargamos
                         setTimeout(() => {
                             setEstadoBoton(false);
                             document.getElementById('progress-panel').style.display = 'none';
-                            location.reload(); // Recargar para mostrar datos
-                        }, 1500);
-                        
-                        if(pollInterval) clearInterval(pollInterval);
+                            location.reload(); 
+                        }, 1000);
                         
                     } else {
-                        // Inactivo / Cancelado / Error
+                        // CASO INACTIVO / CANCELADO (Solo aquí ocultamos)
                         setEstadoBoton(false);
                         document.getElementById('progress-panel').style.display = 'none';
                         if(pollInterval) clearInterval(pollInterval);
+                        pollInterval = null;
                     }
                 })
                 .catch(() => {
-                    if(pollInterval) clearInterval(pollInterval);
+                    // Si falla la red, no matamos el intervalo, reintentamos
+                    console.log("Error de conexión, reintentando...");
                 });
         }
 

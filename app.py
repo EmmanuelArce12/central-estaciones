@@ -477,10 +477,10 @@ def check_existing_ids_vox():
 # ==========================================
 # [NUEVO] API PROGRESO RÁPIDO (Para los que saltamos)
 # ==========================================
+# EN APP.PY (Reemplaza la función existente)
+
 @app.route('/api/progreso-rapido', methods=['POST'])
 def progreso_rapido_api():
-    # Esta API solo sirve para mover la barra azul en el frontend
-    # cuando saltamos registros que ya existen.
     token = request.headers.get('X-API-TOKEN')
     if not Channel.query.filter_by(token=token).first(): return jsonify({}), 401
     
@@ -489,7 +489,9 @@ def progreso_rapido_api():
     
     if ESTADO_CARGA["activo"] and cantidad_saltada > 0:
         ESTADO_CARGA["procesados"] += cantidad_saltada
-        print(f"⏩ Progreso rápido: Sumados {cantidad_saltada} registros existentes.")
+        # AGREGAMOS ESTA LÍNEA PARA QUE EL USUARIO VEA QUE PASA ALGO
+        ESTADO_CARGA["mensaje"] = f"⚡ Verificados {cantidad_saltada} registros existentes..."
+        print(f"⏩ Progreso rápido: Sumados {cantidad_saltada} registros.")
         
     return jsonify({"status": "ok"})
 @app.route('/api/reportar', methods=['POST'])
