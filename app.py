@@ -875,17 +875,27 @@ def lanzar_tiradas():
 
     db.session.commit()
     return jsonify({"status": "ok"})
+@app.route('/api/estado-tiradas')
 @login_required
 def estado_tiradas():
     online = False
     last = "-"
     for ch in current_user.channels:
-        if ch.tipo == 'TIRADAS':
+        # CORRECCIÓN: Usamos .upper() para ignorar mayúsculas/minúsculas
+        if ch.tipo and ch.tipo.upper() == 'TIRADAS':
+            # Chequeo de tiempo (600 segundos = 10 minutos)
             if ch.last_check and (datetime.now() - ch.last_check).total_seconds() < 600:
                 online = True
                 last = ch.last_check.strftime("%H:%M:%S")
-    return jsonify({"online": online, "ultima_vez": last})
+                
+    # También devolvemos si hay un comando pendiente para bloquear el botón
+    cmd_pendiente = False
+    # Buscamos de nuevo para ver si hay comando (puedes optimizar esto, pero así es claro)
+    for ch in current_user.channels:
+        if ch.tipo and ch.tipo.upper() == 'TIRADAS' and ch.comando == 'UPLOAD_TIRADAS':
+            cmd_pendiente = True
 
+    return jsonify({"online": online, "ultima_vez": last, "comando_pendiente": cmd_pendiente})
 @app.route('/estacion/config-vox', methods=['GET', 'POST'])
 @login_required
 def config_vox():
