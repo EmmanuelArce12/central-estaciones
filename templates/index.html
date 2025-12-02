@@ -7,6 +7,7 @@
     
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; padding: 20px; max-width: 900px; margin: 0 auto; }
@@ -22,12 +23,21 @@
         .btn-sync:disabled { background-color: #ccc; cursor: not-allowed; }
 
         /* PANEL PROGRESO */
-        #progress-panel { display: none; margin: 20px 0; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; }
+        #progress-panel { display: none; margin: 20px 0; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); position: relative; }
         .progress-track { background-color: #e9ecef; border-radius: 20px; height: 25px; overflow: hidden; width: 100%; margin-bottom: 10px; }
         .progress-fill { height: 100%; background: linear-gradient(90deg, #007bff, #00c6ff); width: 0%; transition: width 0.5s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem; font-weight: bold; }
-        .status-detail { color: #555; font-weight: 500; font-size: 0.95rem; }
+        .status-detail { color: #555; font-weight: 500; font-size: 0.95rem; text-align: center; }
         .loading-spinner { display: inline-block; animation: spin 1s infinite linear; margin-right: 5px;}
         @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* BOTÓN DETENER */
+        .btn-stop {
+            position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+            background: #dc3545; color: white; border: none; border-radius: 5px;
+            padding: 6px 12px; cursor: pointer; font-size: 0.8rem; font-weight: bold;
+            box-shadow: 0 2px 4px rgba(220,53,69,0.3); transition: 0.2s;
+        }
+        .btn-stop:hover { background: #c82333; }
 
         /* CONTENEDOR FECHA */
         .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 30px; }
@@ -44,20 +54,10 @@
         .info-extra { background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 0.9rem; color: #666; }
 
         /* COLORES CALENDARIO */
-        .day-complete { background: #d4edda !important; border-color: #c3e6cb !important; } /* Verde */
-        .day-partial { background: #fff3cd !important; border-color: #ffeeba !important; } /* Amarillo */
-        .day-current { border: 2px solid #007bff !important; } /* Azul (Hoy) */
-        
-        .flatpickr-day.selected { background: #007bff !important; border-color: #007bff !important; }
-        
-        /* Puntos indicadores */
-        .event-dot {
-            width: 6px; height: 6px; border-radius: 50%;
-            position: absolute; bottom: 2px; left: calc(50% - 3px);
-        }
-        .dot-green { background: #28a745; }
-        .dot-yellow { background: #ffc107; }
-        .dot-blue { background: #17a2b8; }
+        .day-complete { background: #d4edda !important; border-color: #c3e6cb !important; }
+        .day-partial { background: #fff3cd !important; border-color: #ffeeba !important; }
+        .event-dot { width: 6px; height: 6px; border-radius: 50%; position: absolute; bottom: 2px; left: calc(50% - 3px); }
+        .dot-green { background: #28a745; } .dot-yellow { background: #ffc107; } .dot-blue { background: #17a2b8; }
     </style>
 </head>
 <body>
@@ -77,10 +77,11 @@
     <div id="progress-panel">
         <div class="progress-track"><div id="pBar" class="progress-fill">0%</div></div>
         <div id="pText" class="status-detail">Iniciando...</div>
+        <button class="btn-stop" onclick="detenerCarga()">DETENER ✖</button>
     </div>
 
     <div class="search-box">
-        <label style="font-weight:bold; color:#555;">📅 Selecciona Fecha a Visualizar:</label>
+        <label style="font-weight:bold; color:#555;">📅 Selecciona Fecha:</label>
         <div class="date-picker-wrapper">
             <input type="text" id="fechaSelector" placeholder="Elige fecha...">
         </div>
@@ -91,107 +92,59 @@
     </div>
 
     <div id="dashboard" class="dashboard">
-        <div style="grid-column: 1/-1; text-align: center; color:#888; margin-top: 20px;">
-            Cargando datos...
-        </div>
+        <div style="grid-column: 1/-1; text-align: center; color:#888; margin-top: 20px;">Cargando...</div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script> <script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <script>
         const formatMoney = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
         const iconos = { "Mañana": "🌅", "Tarde": "☀️", "Noche": "🌙" };
         let pollInterval = null;
-        let calendarData = {}; // Cache de colores
+        let calendarData = {};
 
-        // INICIO
         window.onload = function() {
+            verificarEstadoCarga(); // Chequear si hay carga activa al entrar
             cargarColoresCalendario().then(() => {
                 iniciarCalendario();
-                cargarResumen(new Date().toISOString().split('T')[0]); // Cargar hoy
+                cargarResumen(new Date().toISOString().split('T')[0]);
             });
-            verificarEstadoCarga();
         };
 
-        // 1. OBTENER COLORES DESDE API
-        async function cargarColoresCalendario() {
-            try {
-                const res = await fetch('/api/estado-calendario');
-                const data = await res.json();
-                // Convertir a objeto para acceso rápido: {"2025-11-28": "verde", ...}
-                data.forEach(item => {
-                    calendarData[item.fecha] = item.estado;
-                });
-            } catch (e) { console.error("Error cargando colores", e); }
-        }
+        // --- FUNCIONES DE CARGA Y CONTROL ---
 
-        // 2. INICIAR CALENDARIO FLATPICKR
-        function iniciarCalendario() {
-            flatpickr("#fechaSelector", {
-                locale: "es",
-                dateFormat: "Y-m-d",
-                defaultDate: "today",
-                onChange: function(selectedDates, dateStr) {
-                    cargarResumen(dateStr);
-                },
-                onDayCreate: function(dObj, dStr, fp, dayElem) {
-                    // Esta función se ejecuta por cada día del calendario
-                    const fechaIso = dayElem.dateObj.toISOString().split('T')[0];
-                    const estado = calendarData[fechaIso];
-
-                    if (estado) {
-                        const dot = document.createElement("span");
-                        dot.className = "event-dot";
-                        if (estado === "verde") dot.classList.add("dot-green");
-                        else if (estado === "amarillo") dot.classList.add("dot-yellow");
-                        else if (estado === "azul") dot.classList.add("dot-blue");
-                        dayElem.appendChild(dot);
-                    }
-                }
-            });
-        }
-
-        // 3. LOGICA BARRIDO CON FECHA PERSONALIZADA
         async function configurarSincronizacion() {
-            // Usamos SweetAlert para pedir la fecha de forma elegante
             const { value: fechaInicio } = await Swal.fire({
-                title: '🔄 Configurar Barrido',
-                html: '<p>Selecciona desde qué fecha quieres re-escanear los reportes.</p><p style="font-size:0.85rem; color:#666;">(Esto rellenará los días incompletos)</p>',
+                title: '🔄 Actualizar desde...',
+                html: '<p>¿Desde qué fecha quieres revisar datos?</p>',
                 input: 'date',
-                inputValue: '2024-11-01', // Default Noviembre
+                inputValue: '2024-11-01',
                 showCancelButton: true,
                 confirmButtonColor: '#e67e22',
-                confirmButtonText: 'Iniciar Carga',
-                cancelButtonText: 'Cancelar'
+                confirmButtonText: 'Iniciar Barrido'
             });
 
             if (fechaInicio) {
-                iniciarCarga(fechaInicio);
+                mostrarUIProceso(true);
+                actualizarBarra(1, `Contactando agente...`);
+                
+                fetch('/api/lanzar-orden', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fecha_inicio: fechaInicio })
+                })
+                .then(r => r.json())
+                .then(d => {
+                    if(d.status === 'ok') {
+                        if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
+                    } else {
+                        mostrarUIProceso(false);
+                        Swal.fire('Error', 'No se pudo iniciar', 'error');
+                    }
+                });
             }
-        }
-
-        function iniciarCarga(fechaInicio) {
-            mostrarUIProceso(true);
-            actualizarBarra(1, `Iniciando desde ${fechaInicio}...`);
-
-            fetch('/api/lanzar-orden', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fecha_inicio: fechaInicio })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.status === 'ok') {
-                    if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
-                } else {
-                    mostrarUIProceso(false);
-                    Swal.fire('Error', 'No se pudo iniciar la orden', 'error');
-                }
-            })
-            .catch(() => {
-                mostrarUIProceso(false);
-                Swal.fire('Error', 'Fallo de conexión', 'error');
-            });
         }
 
         function verificarEstadoCarga() {
@@ -203,12 +156,11 @@
                         actualizarBarra(d.porcentaje, d.mensaje);
                         if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
                     } else if (d.porcentaje === 100) {
-                        mostrarUIProceso(true);
                         actualizarBarra(100, "✅ Carga Completa");
                         setTimeout(() => {
                             mostrarUIProceso(false);
-                            location.reload(); // Recargar para ver los puntos de colores nuevos
-                        }, 2500);
+                            location.reload(); 
+                        }, 2000);
                         detenerPolling();
                     } else {
                         mostrarUIProceso(false);
@@ -216,6 +168,18 @@
                     }
                 })
                 .catch(() => detenerPolling());
+        }
+
+        // --- DETENER CARGA MANUALMENTE ---
+        function detenerCarga() {
+            if(!confirm("¿Detener la carga actual?")) return;
+            
+            fetch('/api/detener-carga', { method: 'POST' })
+                .then(() => {
+                    detenerPolling();
+                    mostrarUIProceso(false);
+                    Swal.fire('Detenido', 'La carga fue cancelada.', 'info');
+                });
         }
 
         function mostrarUIProceso(mostrar) {
@@ -235,8 +199,14 @@
         function actualizarBarra(pct, msg) {
             const b = document.getElementById('pBar');
             const t = document.getElementById('pText');
+            
+            // INTELIGENCIA VISUAL: No pasar del 99% si el server no dice "Completo"
+            if (pct >= 100 && msg !== "✅ Carga Completa") pct = 99;
+            
+            // Suavizado visual: No retroceder la barra
             let w = parseInt(b.style.width)||0;
-            if(pct < w && pct !== 0) pct = w; // No retroceder visualmente
+            if(pct < w && pct !== 0) pct = w; 
+            
             b.style.width = pct + '%';
             b.innerText = pct + '%';
             t.innerText = msg;
@@ -246,37 +216,55 @@
             if(pollInterval) { clearInterval(pollInterval); pollInterval=null; }
         }
 
-        // CARGAR TARJETAS (Dashboard)
+        // --- CALENDARIO Y DATOS ---
+        async function cargarColoresCalendario() {
+            try {
+                const res = await fetch('/api/estado-calendario');
+                const data = await res.json();
+                data.forEach(i => calendarData[i.fecha] = i.estado);
+            } catch (e) {}
+        }
+
+        function iniciarCalendario() {
+            flatpickr("#fechaSelector", {
+                locale: "es", dateFormat: "Y-m-d", defaultDate: "today",
+                onChange: (d, s) => cargarResumen(s),
+                onDayCreate: (dObj, dStr, fp, elem) => {
+                    const f = elem.dateObj.toISOString().split('T')[0];
+                    const st = calendarData[f];
+                    if (st) {
+                        const dot = document.createElement("span");
+                        dot.className = `event-dot dot-${st === 'verde' ? 'green' : (st === 'amarillo' ? 'yellow' : 'blue')}`;
+                        elem.appendChild(dot);
+                    }
+                }
+            });
+        }
+
         async function cargarResumen(fecha) {
-            const dash = document.getElementById('dashboard');
-            dash.innerHTML = '<p style="text-align:center;width:100%;color:#666;">⏳ Cargando...</p>';
+            const d = document.getElementById('dashboard');
+            d.innerHTML = '<p style="text-align:center;width:100%;color:#666;">⏳ Cargando...</p>';
             try {
                 const res = await fetch(`/api/resumen-dia/${fecha}`);
                 const data = await res.json();
-                dash.innerHTML = '';
-                
+                d.innerHTML = '';
                 if (data.length === 0) {
-                    dash.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Día Vacío</h3><p>No hay datos registrados.</p></div>';
+                    d.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Día Vacío</h3></div>';
                     return;
                 }
-                
-                let total = 0;
+                let tot = 0;
                 data.forEach(t => {
-                    total += t.monto;
+                    tot += t.monto;
                     const div = document.createElement('div');
                     div.className = `card ${t.turno}`;
-                    div.innerHTML = `<h2>${t.turno} <span>${iconos[t.turno]}</span></h2>
-                                     <div>📠 ${t.cantidad_cierres} Cierres</div>
-                                     <div class="monto-grande">${formatMoney(t.monto)}</div>
-                                     <div class="info-extra">🕒 ${t.horario_real}</div>`;
-                    dash.appendChild(div);
+                    div.innerHTML = `<h2>${t.turno} <span>${iconos[t.turno]}</span></h2><div>📠 ${t.cantidad_cierres} Cierres</div><div class="monto-grande">${formatMoney(t.monto)}</div><div class="info-extra">🕒 ${t.horario_real}</div>`;
+                    d.appendChild(div);
                 });
-                
-                const tot = document.createElement('div');
-                tot.className = 'card'; tot.style.borderTopColor='#27ae60';
-                tot.innerHTML = `<h2>TOTAL DÍA 💰</h2><div class="monto-grande" style="color:#27ae60">${formatMoney(total)}</div>`;
-                dash.appendChild(tot);
-            } catch (e) { dash.innerHTML = '<p style="color:red;text-align:center">Error de conexión</p>'; }
+                const tdiv = document.createElement('div');
+                tdiv.className = 'card'; tdiv.style.borderTopColor='#27ae60';
+                tdiv.innerHTML = `<h2>TOTAL DÍA 💰</h2><div class="monto-grande" style="color:#27ae60">${formatMoney(tot)}</div>`;
+                d.appendChild(tdiv);
+            } catch(e) { d.innerHTML = '<p style="color:red;text-align:center">Error</p>'; }
         }
     </script>
 </body>

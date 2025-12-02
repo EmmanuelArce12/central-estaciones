@@ -692,24 +692,73 @@ def estado_calendario():
 # ==========================================
 # 🔄 LANZAR ORDEN (CON FECHA PERSONALIZABLE)
 # ==========================================
+# ==========================================
+# ➕ API: AJUSTAR ESTIMACIÓN (NUEVA - Para barra dinámica)
+# ==========================================
+@app.route('/api/ajustar-estimacion', methods=['POST'])
+@login_required
+def ajustar_estimacion():
+    # El agente nos dice: "Encontré X turnos reales"
+    try:
+        data = request.json
+        nuevos_encontrados = data.get('cantidad', 0)
+        
+        if ESTADO_CARGA["activo"]:
+            # Si es el primer ajuste real (cuando dice "Iniciando..."), reemplazamos el estimado
+            if "Iniciando" in ESTADO_CARGA["mensaje"]:
+                # Le sumamos lo que ya procesó + lo nuevo encontrado
+                ESTADO_CARGA["total_estimado"] = max(ESTADO_CARGA["procesados"] + nuevos_encontrados, 1)
+            else:
+                # Si ya estamos en marcha (ej: segundo mes), sumamos al total existente
+                ESTADO_CARGA["total_estimado"] += nuevos_encontrados
+                
+            print(f"📊 Barra ajustada: Se esperan {ESTADO_CARGA['total_estimado']} reportes.")
+            
+        return jsonify({"status": "ok"})
+    except:
+        return jsonify({"status": "error"}), 500
+
+# ==========================================
+# 🛑 API: DETENER CARGA
+# ==========================================
+@app.route('/api/detener-carga', methods=['POST'])
+@login_required
+def detener_carga():
+    ESTADO_CARGA["activo"] = False
+    ESTADO_CARGA["mensaje"] = "🛑 Detenido por usuario"
+    
+    # Limpiamos la orden para que el agente pare
+    for ch in current_user.channels:
+        if ch.tipo == 'VOX': ch.comando = None
+            
+    db.session.commit()
+    print("🛑 Carga detenida manualmente.")
+    return jsonify({"status": "ok"})
+
+# ==========================================
+# 🔄 LANZAR ORDEN (MODIFICADO: INICIO CON ESTIMACIÓN BAJA)
+# ==========================================
 @app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
     try:
         data = request.json or {}
+        fecha_manual = data.get('fecha_inicio')
         
-        # 1. Definir Inicio (Manual o Default 1 Noviembre)
-        # Si el usuario manda fecha, la usamos. Si no, 2024-11-01.
-        inicio_str = data.get('fecha_inicio', '2024-11-01')
-        hoy_str = datetime.now().strftime('%Y-%m-%d')
+        if fecha_manual:
+            rango_inicio = fecha_manual
+            rango_fin = datetime.now().strftime('%Y-%m-%d')
+        else:
+            rango_inicio, rango_fin = get_rango_barrido_seguro()
         
-        # 2. Resetear Estado Visual
+        # INICIO: Ponemos un estimado bajo (ej: 10)
+        # El agente corregirá este número en cuanto lea la lista de turnos real.
         ESTADO_CARGA["activo"] = True
         ESTADO_CARGA["procesados"] = 0
-        ESTADO_CARGA["mensaje"] = f"Iniciando barrido desde {inicio_str}..."
-        ESTADO_CARGA["total_estimado"] = 50 
+        ESTADO_CARGA["total_estimado"] = 10 
+        ESTADO_CARGA["mensaje"] = f"Iniciando: {rango_inicio}..."
         
-        print(f"🔄 ORDEN DE BARRIDO: {inicio_str} al {hoy_str}")
+        print(f"🔄 ORDEN: {rango_inicio} al {rango_fin}")
 
         for ch in current_user.channels:
             if ch.tipo == 'VOX': 
@@ -720,10 +769,8 @@ def lanzar_vox():
                     try: conf = json.loads(ch.config_data)
                     except: pass
                 
-                # Le decimos al agente que busque desde la fecha que elegiste
-                conf['rango_inicio'] = inicio_str
-                conf['rango_fin'] = hoy_str
-                
+                conf['rango_inicio'] = rango_inicio
+                conf['rango_fin'] = rango_fin
                 ch.config_data = json.dumps(conf)
 
         db.session.commit()
@@ -731,8 +778,7 @@ def lanzar_vox():
 
     except Exception as e:
         print(f"🔥 Error 500: {e}")
-        return jsonify({"status": "error", "msg": str(e)}), 500@app.route('/api/lanzar-tiradas', methods=['POST'])
-@login_required
+        return jsonify({"status": "error", "msg": str(e)}), 500@login_required
 def lanzar_tiradas():
     # Recibimos la fecha del frontend (tu HTML envía {fecha_inicio: "YYYY-MM-DD"})
     data = request.json or {}
