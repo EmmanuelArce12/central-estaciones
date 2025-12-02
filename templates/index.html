@@ -152,17 +152,26 @@
                 .then(r => r.json())
                 .then(d => {
                     if (d.activo) {
+                        // Sigue trabajando
                         mostrarUIProceso(true);
                         actualizarBarra(d.porcentaje, d.mensaje);
                         if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
-                    } else if (d.porcentaje === 100) {
-                        actualizarBarra(100, "✅ Carga Completa");
+                    } 
+                    else if (d.mensaje === "✅ Carga Completa" || d.porcentaje === 100) {
+                        // TERMINÓ
+                        mostrarUIProceso(true);
+                        actualizarBarra(100, "✅ ¡Finalizado!");
+                        
+                        // Esperar 2 segundos para que el usuario vea el 100% y luego cerrar
                         setTimeout(() => {
-                            mostrarUIProceso(false);
-                            location.reload(); 
+                            mostrarUIProceso(false); // Ocultar barra
+                            location.reload();       // Recargar página para ver datos nuevos
                         }, 2000);
+                        
                         detenerPolling();
-                    } else {
+                    } 
+                    else {
+                        // Inactivo (por si entras y no hay nada pasando)
                         mostrarUIProceso(false);
                         detenerPolling();
                     }

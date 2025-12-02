@@ -494,6 +494,15 @@ def fin_tarea():
     if ch:
         ch.comando = None
         db.session.commit()
+    
+    # FORZAR ESTADO FINAL VISUAL
+    ESTADO_CARGA["activo"] = False
+    ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
+    # Igualamos procesados al total para que de 100% matemático
+    ESTADO_CARGA["procesados"] = ESTADO_CARGA["total_estimado"] 
+    
+    print("🏁 Agente reportó fin de tarea. Barra al 100%.")
+    return jsonify({"status": "ok"})
         
     ESTADO_CARGA["activo"] = False
     ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
