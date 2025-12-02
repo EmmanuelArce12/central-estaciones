@@ -702,31 +702,28 @@ def estado_calendario():
 # 🔄 LANZAR ORDEN (CON FECHA PERSONALIZABLE)
 # ==========================================
 # ==========================================
-# ➕ API: AJUSTAR ESTIMACIÓN (NUEVA - Para barra dinámica)
+# ➕ API: AJUSTAR ESTIMACIÓN (Lógica Matemática)
 # ==========================================
 @app.route('/api/ajustar-estimacion', methods=['POST'])
 @login_required
 def ajustar_estimacion():
-    # El agente nos dice: "Encontré X turnos reales"
     try:
         data = request.json
         nuevos_encontrados = data.get('cantidad', 0)
         
         if ESTADO_CARGA["activo"]:
-            # Si es el primer ajuste real (cuando dice "Iniciando..."), reemplazamos el estimado
-            if "Iniciando" in ESTADO_CARGA["mensaje"]:
-                # Le sumamos lo que ya procesó + lo nuevo encontrado
+            # Si el agente dice que encontró X registros, ajustamos la meta.
+            # Caso 1: Inicio de carga (estimado dummy vs real)
+            if ESTADO_CARGA["total_estimado"] == 1000: # Valor inicial dummy
                 ESTADO_CARGA["total_estimado"] = max(ESTADO_CARGA["procesados"] + nuevos_encontrados, 1)
             else:
-                # Si ya estamos en marcha (ej: segundo mes), sumamos al total existente
+                # Caso 2: Cambio de mes (acumular)
                 ESTADO_CARGA["total_estimado"] += nuevos_encontrados
-                
-            print(f"📊 Barra ajustada: Se esperan {ESTADO_CARGA['total_estimado']} reportes.")
+            
+            print(f"📊 Barra ajustada: Meta es {ESTADO_CARGA['total_estimado']} reportes.")
             
         return jsonify({"status": "ok"})
-    except:
-        return jsonify({"status": "error"}), 500
-
+    except: return jsonify({"status": "error"}), 500
 # ==========================================
 # 🛑 API: DETENER CARGA
 # ==========================================
@@ -748,6 +745,10 @@ def detener_carga():
 # 🔄 LANZAR ORDEN (MODIFICADO: INICIO CON ESTIMACIÓN BAJA)
 # ==========================================
 @app.route('/api/lanzar-orden', methods=['POST'])
+# ==========================================
+# 🔄 LANZAR ORDEN (Valor Inicial Dummy Alto)
+# ==========================================
+@app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
     try:
@@ -760,11 +761,10 @@ def lanzar_vox():
         else:
             rango_inicio, rango_fin = get_rango_barrido_seguro()
         
-        # INICIO: Ponemos un estimado bajo (ej: 10)
-        # El agente corregirá este número en cuanto lea la lista de turnos real.
         ESTADO_CARGA["activo"] = True
         ESTADO_CARGA["procesados"] = 0
-        ESTADO_CARGA["total_estimado"] = 10 
+        # Ponemos 1000 para que la barra empiece en 0% y no salte hasta que el agente cuente
+        ESTADO_CARGA["total_estimado"] = 1000 
         ESTADO_CARGA["mensaje"] = f"Iniciando: {rango_inicio}..."
         
         print(f"🔄 ORDEN: {rango_inicio} al {rango_fin}")
@@ -787,7 +787,7 @@ def lanzar_vox():
 
     except Exception as e:
         print(f"🔥 Error 500: {e}")
-        return jsonify({"status": "error", "msg": str(e)}), 500@login_required
+        return jsonify({"status": "error", "msg": str(e)}), 500
 def lanzar_tiradas():
     # Recibimos la fecha del frontend (tu HTML envía {fecha_inicio: "YYYY-MM-DD"})
     data = request.json or {}

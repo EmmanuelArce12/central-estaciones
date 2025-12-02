@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reportes</title>
-    
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 
     <style>
@@ -18,32 +16,32 @@
         .btn-back { text-decoration: none; background-color: #6c757d; color: white; padding: 8px 15px; border-radius: 6px; font-weight: bold; font-size: 0.9rem; }
         .btn-conf { text-decoration: none; background-color: #343a40; color: white; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; }
         
-        .btn-sync { background-color: #e67e22; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 0.9rem; transition: 0.2s; }
-        .btn-sync:hover { background-color: #d35400; }
-        .btn-sync:disabled { background-color: #ccc; cursor: not-allowed; }
+        /* BOTÓN DE ACCIÓN (CAMBIANTE) */
+        #btnAction { 
+            border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; 
+            display: flex; align-items: center; gap: 5px; font-size: 0.9rem; transition: 0.2s; color: white;
+            min-width: 160px; justify-content: center;
+        }
+        
+        /* ESTADO NORMAL: NARANJA */
+        .btn-start { background-color: #e67e22; }
+        .btn-start:hover { background-color: #d35400; }
+        
+        /* ESTADO TRABAJANDO: ROJO */
+        .btn-working { background-color: #dc3545; animation: pulse 2s infinite; }
+        .btn-working:hover { background-color: #c82333; }
+        
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); } 100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); } }
 
-        /* PANEL PROGRESO */
-        #progress-panel { display: none; margin: 20px 0; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); position: relative; }
+        /* BARRA PROGRESO */
+        #progress-panel { display: none; margin: 20px 0; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .progress-track { background-color: #e9ecef; border-radius: 20px; height: 25px; overflow: hidden; width: 100%; margin-bottom: 10px; }
         .progress-fill { height: 100%; background: linear-gradient(90deg, #007bff, #00c6ff); width: 0%; transition: width 0.5s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem; font-weight: bold; }
         .status-detail { color: #555; font-weight: 500; font-size: 0.95rem; text-align: center; }
-        .loading-spinner { display: inline-block; animation: spin 1s infinite linear; margin-right: 5px;}
-        @keyframes spin { 100% { transform: rotate(360deg); } }
 
-        /* BOTÓN DETENER */
-        .btn-stop {
-            position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
-            background: #dc3545; color: white; border: none; border-radius: 5px;
-            padding: 6px 12px; cursor: pointer; font-size: 0.8rem; font-weight: bold;
-            box-shadow: 0 2px 4px rgba(220,53,69,0.3); transition: 0.2s;
-        }
-        .btn-stop:hover { background: #c82333; }
-
-        /* CONTENEDOR FECHA */
         .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 30px; }
-        .date-picker-wrapper { width: 100%; max-width: 300px; }
         input.flatpickr-input { width: 100%; padding: 12px; font-size: 1.1rem; border: 1px solid #ccc; border-radius: 6px; text-align: center; background: #fff; cursor: pointer; }
-
+        
         .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
         .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #ccc; animation: fadeIn 0.5s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -52,10 +50,7 @@
         .card h2 { margin: 0 0 5px 0; font-size: 1.4rem; color: #555; display: flex; justify-content: space-between; }
         .monto-grande { font-size: 2rem; font-weight: bold; color: #27ae60; margin: 15px 0; }
         .info-extra { background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 0.9rem; color: #666; }
-
-        /* COLORES CALENDARIO */
-        .day-complete { background: #d4edda !important; border-color: #c3e6cb !important; }
-        .day-partial { background: #fff3cd !important; border-color: #ffeeba !important; }
+        
         .event-dot { width: 6px; height: 6px; border-radius: 50%; position: absolute; bottom: 2px; left: calc(50% - 3px); }
         .dot-green { background: #28a745; } .dot-yellow { background: #ffc107; } .dot-blue { background: #17a2b8; }
     </style>
@@ -67,7 +62,8 @@
             <a href="/estacion/panel" class="btn-back">⬅️ Panel</a>
             <a href="/estacion/config-vox" class="btn-conf">⚙️</a>
         </div>
-        <button id="btnSync" class="btn-sync" onclick="configurarSincronizacion()">
+        
+        <button id="btnAction" class="btn-start" onclick="manejarAccion()">
             🔄 ACTUALIZAR DATOS
         </button>
     </div>
@@ -76,8 +72,7 @@
 
     <div id="progress-panel">
         <div class="progress-track"><div id="pBar" class="progress-fill">0%</div></div>
-        <div id="pText" class="status-detail">Iniciando...</div>
-        <button class="btn-stop" onclick="detenerCarga()">DETENER ✖</button>
+        <div id="pText" class="status-detail">Esperando al agente...</div>
     </div>
 
     <div class="search-box">
@@ -104,31 +99,60 @@
         const iconos = { "Mañana": "🌅", "Tarde": "☀️", "Noche": "🌙" };
         let pollInterval = null;
         let calendarData = {};
+        let esTrabajando = false; // Estado local del botón
 
         window.onload = function() {
-            verificarEstadoCarga(); // Chequear si hay carga activa al entrar
+            verificarEstadoCarga(); 
             cargarColoresCalendario().then(() => {
                 iniciarCalendario();
                 cargarResumen(new Date().toISOString().split('T')[0]);
             });
         };
 
-        // --- FUNCIONES DE CARGA Y CONTROL ---
+        // --- LÓGICA DEL BOTÓN ÚNICO ---
+        function manejarAccion() {
+            if (esTrabajando) {
+                // Si está trabajando, el botón es DETENER
+                if(!confirm("¿Deseas DETENER la carga actual?")) return;
+                fetch('/api/detener-carga', { method: 'POST' }).then(() => {
+                    setEstadoBoton(false);
+                    document.getElementById('progress-panel').style.display = 'none';
+                    if(pollInterval) clearInterval(pollInterval);
+                    Swal.fire('Detenido', 'Carga cancelada.', 'info');
+                });
+            } else {
+                // Si está libre, el botón es ACTUALIZAR
+                iniciarSincronizacion();
+            }
+        }
 
-        async function configurarSincronizacion() {
+        function setEstadoBoton(trabajando) {
+            esTrabajando = trabajando;
+            const btn = document.getElementById('btnAction');
+            if (trabajando) {
+                btn.className = "btn-working";
+                btn.innerHTML = '<i class="fas fa-stop-circle"></i> DETENER CARGA';
+            } else {
+                btn.className = "btn-start";
+                btn.innerHTML = '🔄 ACTUALIZAR DATOS';
+            }
+        }
+
+        async function iniciarSincronizacion() {
             const { value: fechaInicio } = await Swal.fire({
-                title: '🔄 Actualizar desde...',
-                html: '<p>¿Desde qué fecha quieres revisar datos?</p>',
+                title: '🔄 Iniciar Barrido',
+                html: '<p>Buscar turnos faltantes desde:</p>',
                 input: 'date',
                 inputValue: '2024-11-01',
                 showCancelButton: true,
                 confirmButtonColor: '#e67e22',
-                confirmButtonText: 'Iniciar Barrido'
+                confirmButtonText: 'Iniciar'
             });
 
             if (fechaInicio) {
-                mostrarUIProceso(true);
-                actualizarBarra(1, `Contactando agente...`);
+                setEstadoBoton(true); // Cambiar a rojo
+                document.getElementById('progress-panel').style.display = 'block';
+                actualizarBarra(0, "Contactando Agente...");
                 
                 fetch('/api/lanzar-orden', {
                     method: 'POST',
@@ -140,7 +164,7 @@
                     if(d.status === 'ok') {
                         if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
                     } else {
-                        mostrarUIProceso(false);
+                        setEstadoBoton(false);
                         Swal.fire('Error', 'No se pudo iniciar', 'error');
                     }
                 });
@@ -152,80 +176,42 @@
                 .then(r => r.json())
                 .then(d => {
                     if (d.activo) {
-                        // Sigue trabajando
-                        mostrarUIProceso(true);
+                        setEstadoBoton(true);
+                        document.getElementById('progress-panel').style.display = 'block';
                         actualizarBarra(d.porcentaje, d.mensaje);
                         if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
-                    } 
-                    else if (d.mensaje === "✅ Carga Completa" || d.porcentaje === 100) {
-                        // TERMINÓ
-                        mostrarUIProceso(true);
-                        actualizarBarra(100, "✅ ¡Finalizado!");
-                        
-                        // Esperar 2 segundos para que el usuario vea el 100% y luego cerrar
+                    } else if (d.porcentaje === 100) {
+                        actualizarBarra(100, "✅ Carga Completa");
                         setTimeout(() => {
-                            mostrarUIProceso(false); // Ocultar barra
-                            location.reload();       // Recargar página para ver datos nuevos
+                            setEstadoBoton(false);
+                            document.getElementById('progress-panel').style.display = 'none';
+                            location.reload(); 
                         }, 2000);
-                        
-                        detenerPolling();
-                    } 
-                    else {
-                        // Inactivo (por si entras y no hay nada pasando)
-                        mostrarUIProceso(false);
-                        detenerPolling();
+                        if(pollInterval) clearInterval(pollInterval);
+                    } else {
+                        setEstadoBoton(false);
+                        document.getElementById('progress-panel').style.display = 'none';
+                        if(pollInterval) clearInterval(pollInterval);
                     }
                 })
-                .catch(() => detenerPolling());
-        }
-
-        // --- DETENER CARGA MANUALMENTE ---
-        function detenerCarga() {
-            if(!confirm("¿Detener la carga actual?")) return;
-            
-            fetch('/api/detener-carga', { method: 'POST' })
-                .then(() => {
-                    detenerPolling();
-                    mostrarUIProceso(false);
-                    Swal.fire('Detenido', 'La carga fue cancelada.', 'info');
+                .catch(() => {
+                    if(pollInterval) clearInterval(pollInterval);
                 });
-        }
-
-        function mostrarUIProceso(mostrar) {
-            const p = document.getElementById('progress-panel');
-            const b = document.getElementById('btnSync');
-            if(mostrar) {
-                p.style.display = 'block';
-                b.disabled = true;
-                b.innerHTML = '<span class="loading-spinner">⚙️</span> TRABAJANDO...';
-            } else {
-                p.style.display = 'none';
-                b.disabled = false;
-                b.innerText = "🔄 ACTUALIZAR DATOS";
-            }
         }
 
         function actualizarBarra(pct, msg) {
             const b = document.getElementById('pBar');
             const t = document.getElementById('pText');
-            
-            // INTELIGENCIA VISUAL: No pasar del 99% si el server no dice "Completo"
-            if (pct >= 100 && msg !== "✅ Carga Completa") pct = 99;
-            
-            // Suavizado visual: No retroceder la barra
-            let w = parseInt(b.style.width)||0;
-            if(pct < w && pct !== 0) pct = w; 
+            // Validaciones visuales
+            if (pct > 100) pct = 99; // Nunca mostrar 100 si no terminó
+            if (msg.includes("Completa")) pct = 100;
             
             b.style.width = pct + '%';
             b.innerText = pct + '%';
             t.innerText = msg;
         }
 
-        function detenerPolling() {
-            if(pollInterval) { clearInterval(pollInterval); pollInterval=null; }
-        }
-
-        // --- CALENDARIO Y DATOS ---
+        // --- CALENDARIO Y DATOS (Igual que antes) ---
         async function cargarColoresCalendario() {
             try {
                 const res = await fetch('/api/estado-calendario');
@@ -233,7 +219,6 @@
                 data.forEach(i => calendarData[i.fecha] = i.estado);
             } catch (e) {}
         }
-
         function iniciarCalendario() {
             flatpickr("#fechaSelector", {
                 locale: "es", dateFormat: "Y-m-d", defaultDate: "today",
@@ -249,7 +234,6 @@
                 }
             });
         }
-
         async function cargarResumen(fecha) {
             const d = document.getElementById('dashboard');
             d.innerHTML = '<p style="text-align:center;width:100%;color:#666;">⏳ Cargando...</p>';
@@ -257,10 +241,7 @@
                 const res = await fetch(`/api/resumen-dia/${fecha}`);
                 const data = await res.json();
                 d.innerHTML = '';
-                if (data.length === 0) {
-                    d.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Día Vacío</h3></div>';
-                    return;
-                }
+                if (data.length === 0) { d.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Día Vacío</h3></div>'; return; }
                 let tot = 0;
                 data.forEach(t => {
                     tot += t.monto;
