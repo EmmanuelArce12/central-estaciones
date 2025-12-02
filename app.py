@@ -547,30 +547,34 @@ def api_reportar_vox():
         print(f"🔥 ERROR API REPORTAR: {e}")
         # En caso de error, no frenamos todo, solo reportamos fallo
         return jsonify({"status":"error", "msg": str(e)}), 500
+# ==========================================
+# CORRECCIÓN EN APP.PY - ESTADO FINAL FORZADO
+# ==========================================
 @app.route('/api/fin-tarea', methods=['POST'])
 def fin_tarea():
-    # El agente avisa que terminó
-    token = request.headers.get('X-API-TOKEN')
-    ch = Channel.query.filter_by(token=token).first()
-    if ch:
-        ch.comando = None
-        db.session.commit()
-    
-    # FORZAR ESTADO FINAL VISUAL
-    ESTADO_CARGA["activo"] = False
-    ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
-    # Igualamos procesados al total para que de 100% matemático
-    ESTADO_CARGA["procesados"] = ESTADO_CARGA["total_estimado"] 
-    
-    print("🏁 Agente reportó fin de tarea. Barra al 100%.")
-    return jsonify({"status": "ok"})
+    try:
+        token = request.headers.get('X-API-TOKEN')
+        # Buscamos al canal para apagar el comando
+        ch = Channel.query.filter_by(token=token).first()
+        if ch:
+            ch.comando = None
+            db.session.commit()
         
-    ESTADO_CARGA["activo"] = False
-    ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
-    ESTADO_CARGA["procesados"] = ESTADO_CARGA["total_estimado"] # Forzar 100%
-    
-    return jsonify({"status": "ok"})
-
+        # FUERZA BRUTA: Reseteamos las variables globales de progreso
+        ESTADO_CARGA["activo"] = False
+        ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
+        # Igualamos procesados al total para que matemáticamente de 100%
+        if ESTADO_CARGA["total_estimado"] > 0:
+            ESTADO_CARGA["procesados"] = ESTADO_CARGA["total_estimado"]
+        else:
+            ESTADO_CARGA["procesados"] = 1
+            ESTADO_CARGA["total_estimado"] = 1
+            
+        print("🏁 SEÑAL DE FIN RECIBIDA: Barra forzada al 100%")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"🔥 Error en fin-tarea: {e}")
+        return jsonify({"status": "error"}), 500
 @app.route('/api/estado-progreso')
 @login_required
 def estado_progreso():
