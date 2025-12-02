@@ -4,60 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reportes</title>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css">
+
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; padding: 20px; max-width: 900px; margin: 0 auto; }
         .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; }
         h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
         
         .header-actions { display: flex; gap: 10px; }
-        
         .btn-back { text-decoration: none; background-color: #6c757d; color: white; padding: 8px 15px; border-radius: 6px; font-weight: bold; font-size: 0.9rem; }
         .btn-conf { text-decoration: none; background-color: #343a40; color: white; padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; }
         
-        /* BOTÓN ACTUALIZAR GRANDE */
         .btn-sync { background-color: #e67e22; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; font-size: 0.9rem; transition: 0.2s; }
         .btn-sync:hover { background-color: #d35400; }
         .btn-sync:disabled { background-color: #ccc; cursor: not-allowed; }
 
-        /* PANEL DE PROGRESO MEJORADO */
-        #progress-panel { 
-            display: none; 
-            margin: 20px 0; 
-            background: white; 
-            padding: 20px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
-            text-align: center;
-        }
-        .progress-track { 
-            background-color: #e9ecef; 
-            border-radius: 20px; 
-            height: 25px; 
-            overflow: hidden; 
-            width: 100%; 
-            margin-bottom: 10px;
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .progress-fill {
-            height: 100%; 
-            background: linear-gradient(90deg, #007bff, #00c6ff); 
-            width: 0%;
-            transition: width 0.5s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
+        /* PANEL PROGRESO */
+        #progress-panel { display: none; margin: 20px 0; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; }
+        .progress-track { background-color: #e9ecef; border-radius: 20px; height: 25px; overflow: hidden; width: 100%; margin-bottom: 10px; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #007bff, #00c6ff); width: 0%; transition: width 0.5s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem; font-weight: bold; }
         .status-detail { color: #555; font-weight: 500; font-size: 0.95rem; }
         .loading-spinner { display: inline-block; animation: spin 1s infinite linear; margin-right: 5px;}
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
-        .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
-        input[type="date"] { padding: 10px; font-size: 1.1rem; border-radius: 6px; border: 1px solid #ccc; }
-        .btn-search { padding: 10px 25px; background: #2980b9; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
-        
+        /* CONTENEDOR FECHA */
+        .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 30px; }
+        .date-picker-wrapper { width: 100%; max-width: 300px; }
+        input.flatpickr-input { width: 100%; padding: 12px; font-size: 1.1rem; border: 1px solid #ccc; border-radius: 6px; text-align: center; background: #fff; cursor: pointer; }
+
         .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
         .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #ccc; animation: fadeIn 0.5s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -66,6 +42,22 @@
         .card h2 { margin: 0 0 5px 0; font-size: 1.4rem; color: #555; display: flex; justify-content: space-between; }
         .monto-grande { font-size: 2rem; font-weight: bold; color: #27ae60; margin: 15px 0; }
         .info-extra { background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 0.9rem; color: #666; }
+
+        /* COLORES CALENDARIO */
+        .day-complete { background: #d4edda !important; border-color: #c3e6cb !important; } /* Verde */
+        .day-partial { background: #fff3cd !important; border-color: #ffeeba !important; } /* Amarillo */
+        .day-current { border: 2px solid #007bff !important; } /* Azul (Hoy) */
+        
+        .flatpickr-day.selected { background: #007bff !important; border-color: #007bff !important; }
+        
+        /* Puntos indicadores */
+        .event-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            position: absolute; bottom: 2px; left: calc(50% - 3px);
+        }
+        .dot-green { background: #28a745; }
+        .dot-yellow { background: #ffc107; }
+        .dot-blue { background: #17a2b8; }
     </style>
 </head>
 <body>
@@ -73,178 +65,218 @@
     <div class="header">
         <div class="header-actions">
             <a href="/estacion/panel" class="btn-back">⬅️ Panel</a>
-            <a href="/estacion/config-vox" class="btn-conf" title="Configurar Conexión VOX">⚙️</a>
+            <a href="/estacion/config-vox" class="btn-conf">⚙️</a>
         </div>
-        
-        <button id="btnSync" class="btn-sync" onclick="iniciarSincronizacion()">
+        <button id="btnSync" class="btn-sync" onclick="configurarSincronizacion()">
             🔄 ACTUALIZAR DATOS
         </button>
     </div>
     
-    <h1 style="text-align:center; margin-bottom:20px;">Reporte: {{ usuario }}</h1>
+    <h1 style="text-align:center;">Reporte: {{ usuario }}</h1>
 
     <div id="progress-panel">
-        <div class="progress-track">
-            <div id="pBar" class="progress-fill">0%</div>
-        </div>
-        <div id="pText" class="status-detail">Iniciando conexión...</div>
+        <div class="progress-track"><div id="pBar" class="progress-fill">0%</div></div>
+        <div id="pText" class="status-detail">Iniciando...</div>
     </div>
 
     <div class="search-box">
-        <input type="date" id="fechaSelector">
-        <button class="btn-search" onclick="cargarResumen()">Ver Fecha</button>
+        <label style="font-weight:bold; color:#555;">📅 Selecciona Fecha a Visualizar:</label>
+        <div class="date-picker-wrapper">
+            <input type="text" id="fechaSelector" placeholder="Elige fecha...">
+        </div>
+        <div style="font-size:0.8rem; display:flex; gap:15px; margin-top:5px;">
+            <span style="display:flex; align-items:center;"><span class="event-dot dot-green" style="position:static; margin-right:5px;"></span>Completo</span>
+            <span style="display:flex; align-items:center;"><span class="event-dot dot-yellow" style="position:static; margin-right:5px;"></span>Incompleto</span>
+        </div>
     </div>
 
     <div id="dashboard" class="dashboard">
         <div style="grid-column: 1/-1; text-align: center; color:#888; margin-top: 20px;">
-            Selecciona una fecha arriba para ver los datos.
+            Cargando datos...
         </div>
     </div>
 
-    <script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script> <script>
         const formatMoney = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
         const iconos = { "Mañana": "🌅", "Tarde": "☀️", "Noche": "🌙" };
         let pollInterval = null;
+        let calendarData = {}; // Cache de colores
 
-        // AL CARGAR LA PÁGINA: Verificar si hay carga en curso
+        // INICIO
         window.onload = function() {
+            cargarColoresCalendario().then(() => {
+                iniciarCalendario();
+                cargarResumen(new Date().toISOString().split('T')[0]); // Cargar hoy
+            });
             verificarEstadoCarga();
-            document.getElementById('fechaSelector').valueAsDate = new Date();
-            // Cargar datos del día por defecto si no hay carga activa
-            setTimeout(() => {
-                if(document.getElementById('progress-panel').style.display === 'none') {
-                    cargarResumen();
-                }
-            }, 500);
         };
 
-        function iniciarSincronizacion() {
-            if(!confirm("¿Iniciar carga masiva desde Noviembre?\nEsto buscará y rellenará los días faltantes.")) return;
-            
-            // Mostrar UI inmediatamente
-            mostrarCarga(true);
-            actualizarBarra(1, "Contactando Agente...");
-            
-            // Lanzar orden al servidor
-            fetch('/api/lanzar-orden', { method: 'POST' })
-                .then(res => res.json())
-                .then(data => {
-                    if(data.status === 'ok') {
-                        // Comenzar a vigilar el progreso
-                        if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
-                    } else {
-                        alert("Error al iniciar orden");
-                        mostrarCarga(false);
-                    }
-                })
-                .catch(err => { 
-                    alert("Error de conexión"); 
-                    mostrarCarga(false); 
+        // 1. OBTENER COLORES DESDE API
+        async function cargarColoresCalendario() {
+            try {
+                const res = await fetch('/api/estado-calendario');
+                const data = await res.json();
+                // Convertir a objeto para acceso rápido: {"2025-11-28": "verde", ...}
+                data.forEach(item => {
+                    calendarData[item.fecha] = item.estado;
                 });
+            } catch (e) { console.error("Error cargando colores", e); }
+        }
+
+        // 2. INICIAR CALENDARIO FLATPICKR
+        function iniciarCalendario() {
+            flatpickr("#fechaSelector", {
+                locale: "es",
+                dateFormat: "Y-m-d",
+                defaultDate: "today",
+                onChange: function(selectedDates, dateStr) {
+                    cargarResumen(dateStr);
+                },
+                onDayCreate: function(dObj, dStr, fp, dayElem) {
+                    // Esta función se ejecuta por cada día del calendario
+                    const fechaIso = dayElem.dateObj.toISOString().split('T')[0];
+                    const estado = calendarData[fechaIso];
+
+                    if (estado) {
+                        const dot = document.createElement("span");
+                        dot.className = "event-dot";
+                        if (estado === "verde") dot.classList.add("dot-green");
+                        else if (estado === "amarillo") dot.classList.add("dot-yellow");
+                        else if (estado === "azul") dot.classList.add("dot-blue");
+                        dayElem.appendChild(dot);
+                    }
+                }
+            });
+        }
+
+        // 3. LOGICA BARRIDO CON FECHA PERSONALIZADA
+        async function configurarSincronizacion() {
+            // Usamos SweetAlert para pedir la fecha de forma elegante
+            const { value: fechaInicio } = await Swal.fire({
+                title: '🔄 Configurar Barrido',
+                html: '<p>Selecciona desde qué fecha quieres re-escanear los reportes.</p><p style="font-size:0.85rem; color:#666;">(Esto rellenará los días incompletos)</p>',
+                input: 'date',
+                inputValue: '2024-11-01', // Default Noviembre
+                showCancelButton: true,
+                confirmButtonColor: '#e67e22',
+                confirmButtonText: 'Iniciar Carga',
+                cancelButtonText: 'Cancelar'
+            });
+
+            if (fechaInicio) {
+                iniciarCarga(fechaInicio);
+            }
+        }
+
+        function iniciarCarga(fechaInicio) {
+            mostrarUIProceso(true);
+            actualizarBarra(1, `Iniciando desde ${fechaInicio}...`);
+
+            fetch('/api/lanzar-orden', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fecha_inicio: fechaInicio })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'ok') {
+                    if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
+                } else {
+                    mostrarUIProceso(false);
+                    Swal.fire('Error', 'No se pudo iniciar la orden', 'error');
+                }
+            })
+            .catch(() => {
+                mostrarUIProceso(false);
+                Swal.fire('Error', 'Fallo de conexión', 'error');
+            });
         }
 
         function verificarEstadoCarga() {
             fetch('/api/estado-progreso')
-                .then(res => res.json())
-                .then(data => {
-                    if (data.activo) {
-                        mostrarCarga(true);
-                        actualizarBarra(data.porcentaje, data.mensaje);
-                        // Asegurar que el polling siga activo
+                .then(r => r.json())
+                .then(d => {
+                    if (d.activo) {
+                        mostrarUIProceso(true);
+                        actualizarBarra(d.porcentaje, d.mensaje);
                         if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
-                    } else if (data.porcentaje === 100) {
-                        // Terminó recientemente
-                        mostrarCarga(true);
+                    } else if (d.porcentaje === 100) {
+                        mostrarUIProceso(true);
                         actualizarBarra(100, "✅ Carga Completa");
-                        
-                        // Esperar un poco y cerrar
                         setTimeout(() => {
-                            mostrarCarga(false);
-                            cargarResumen(); // Recargar datos automáticamente
-                        }, 3000);
-                        stopPolling();
+                            mostrarUIProceso(false);
+                            location.reload(); // Recargar para ver los puntos de colores nuevos
+                        }, 2500);
+                        detenerPolling();
                     } else {
-                        // Inactivo
-                        mostrarCarga(false);
-                        stopPolling();
+                        mostrarUIProceso(false);
+                        detenerPolling();
                     }
                 })
-                .catch(() => stopPolling());
+                .catch(() => detenerPolling());
         }
 
-        function mostrarCarga(show) {
-            const panel = document.getElementById('progress-panel');
-            const btn = document.getElementById('btnSync');
-            
-            if(show) {
-                panel.style.display = 'block';
-                btn.disabled = true;
-                btn.innerHTML = '<span class="loading-spinner">⚙️</span> TRABAJANDO...';
+        function mostrarUIProceso(mostrar) {
+            const p = document.getElementById('progress-panel');
+            const b = document.getElementById('btnSync');
+            if(mostrar) {
+                p.style.display = 'block';
+                b.disabled = true;
+                b.innerHTML = '<span class="loading-spinner">⚙️</span> TRABAJANDO...';
             } else {
-                panel.style.display = 'none';
-                btn.disabled = false;
-                btn.innerText = "🔄 ACTUALIZAR DATOS";
+                p.style.display = 'none';
+                b.disabled = false;
+                b.innerText = "🔄 ACTUALIZAR DATOS";
             }
         }
 
         function actualizarBarra(pct, msg) {
-            const bar = document.getElementById('pBar');
-            const txt = document.getElementById('pText');
-            
-            // Asegurar que el porcentaje no baje
-            let currentWidth = parseInt(bar.style.width) || 0;
-            if (pct < currentWidth && pct !== 0) pct = currentWidth;
-            
-            bar.style.width = pct + '%';
-            bar.innerText = pct + '%';
-            txt.innerText = msg;
+            const b = document.getElementById('pBar');
+            const t = document.getElementById('pText');
+            let w = parseInt(b.style.width)||0;
+            if(pct < w && pct !== 0) pct = w; // No retroceder visualmente
+            b.style.width = pct + '%';
+            b.innerText = pct + '%';
+            t.innerText = msg;
         }
 
-        function stopPolling() {
-            if(pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        function detenerPolling() {
+            if(pollInterval) { clearInterval(pollInterval); pollInterval=null; }
         }
 
-        // --- LÓGICA DE CARGA DE REPORTES (DASHBOARD) ---
-        async function cargarResumen() {
-            const fecha = document.getElementById('fechaSelector').value;
-            const dashboard = document.getElementById('dashboard');
-            if(!fecha) return alert("Selecciona fecha");
-
-            dashboard.innerHTML = '<p style="text-align:center; width:100%; color:#666;">⏳ Cargando datos...</p>';
-
+        // CARGAR TARJETAS (Dashboard)
+        async function cargarResumen(fecha) {
+            const dash = document.getElementById('dashboard');
+            dash.innerHTML = '<p style="text-align:center;width:100%;color:#666;">⏳ Cargando...</p>';
             try {
                 const res = await fetch(`/api/resumen-dia/${fecha}`);
-                const datos = await res.json();
-                dashboard.innerHTML = '';
-
-                if (datos.length === 0) {
-                    dashboard.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Sin movimientos</h3><p>No hay datos para esta fecha.</p></div>';
+                const data = await res.json();
+                dash.innerHTML = '';
+                
+                if (data.length === 0) {
+                    dash.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#777;"><h3>📭 Día Vacío</h3><p>No hay datos registrados.</p></div>';
                     return;
                 }
-
-                let total = 0;
-                datos.forEach(t => {
-                    total += t.monto;
-                    const c = document.createElement('div');
-                    c.className = `card ${t.turno}`;
-                    c.innerHTML = `
-                        <h2>${t.turno} <span style="font-size:1.5rem">${iconos[t.turno]||''}</span></h2>
-                        <div style="font-weight:600;color:#888;margin-bottom:15px">📠 ${t.cantidad_cierres} Cierres</div>
-                        <div class="monto-grande">${formatMoney(t.monto)}</div>
-                        <div class="info-extra">🕒 ${t.horario_real}</div>
-                    `;
-                    dashboard.appendChild(c);
-                });
-
-                const cTot = document.createElement('div');
-                cTot.className = 'card'; 
-                cTot.style.borderTopColor='#27ae60';
-                cTot.innerHTML = `<h2>TOTAL DÍA 💰</h2><div class="monto-grande" style="color:#27ae60">${formatMoney(total)}</div>`;
-                dashboard.appendChild(cTot);
                 
-            } catch(e) { 
-                dashboard.innerHTML='<p style="color:red;text-align:center">Error de conexión</p>'; 
-            }
+                let total = 0;
+                data.forEach(t => {
+                    total += t.monto;
+                    const div = document.createElement('div');
+                    div.className = `card ${t.turno}`;
+                    div.innerHTML = `<h2>${t.turno} <span>${iconos[t.turno]}</span></h2>
+                                     <div>📠 ${t.cantidad_cierres} Cierres</div>
+                                     <div class="monto-grande">${formatMoney(t.monto)}</div>
+                                     <div class="info-extra">🕒 ${t.horario_real}</div>`;
+                    dash.appendChild(div);
+                });
+                
+                const tot = document.createElement('div');
+                tot.className = 'card'; tot.style.borderTopColor='#27ae60';
+                tot.innerHTML = `<h2>TOTAL DÍA 💰</h2><div class="monto-grande" style="color:#27ae60">${formatMoney(total)}</div>`;
+                dash.appendChild(tot);
+            } catch (e) { dash.innerHTML = '<p style="color:red;text-align:center">Error de conexión</p>'; }
         }
     </script>
 </body>

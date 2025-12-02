@@ -653,20 +653,63 @@ ESTADO_CARGA = {
     "inicio": None
 }
 
+# ==========================================
+# 🗓️ API ESTADO CALENDARIO (COLORES)
+# ==========================================
+@app.route('/api/estado-calendario')
+@login_required
+def estado_calendario():
+    # Buscamos todos los reportes del usuario
+    reportes = db.session.query(Reporte.fecha_operativa, Reporte.turno).filter_by(user_id=current_user.id).all()
+    
+    # Agrupamos en memoria
+    # Estructura: { "2025-11-28": {"Mañana", "Noche"}, ... }
+    dias = {}
+    for r in reportes:
+        if not r.fecha_operativa: continue
+        if r.fecha_operativa not in dias: dias[r.fecha_operativa] = set()
+        dias[r.fecha_operativa].add(r.turno)
+    
+    resultado = []
+    hoy = datetime.now().date().strftime('%Y-%m-%d')
+    
+    for fecha, turnos in dias.items():
+        cantidad = len(turnos)
+        estado = "rojo"
+        
+        # Lógica de colores
+        if cantidad >= 3:
+            estado = "verde" # Completo
+        elif 0 < cantidad < 3:
+            # Si es HOY, no lo marcamos como incompleto (amarillo) todavía, lo dejamos neutro o azul
+            if fecha == hoy: estado = "azul" 
+            else: estado = "amarillo" # Incompleto histórico
+            
+        resultado.append({"fecha": fecha, "estado": estado})
+        
+    return jsonify(resultado)
+
+# ==========================================
+# 🔄 LANZAR ORDEN (CON FECHA PERSONALIZABLE)
+# ==========================================
 @app.route('/api/lanzar-orden', methods=['POST'])
 @login_required
 def lanzar_vox():
     try:
-        # Usamos la función segura
-        rango_inicio, rango_fin = get_rango_barrido_seguro()
+        data = request.json or {}
         
-        # Configurar barra de progreso
+        # 1. Definir Inicio (Manual o Default 1 Noviembre)
+        # Si el usuario manda fecha, la usamos. Si no, 2024-11-01.
+        inicio_str = data.get('fecha_inicio', '2024-11-01')
+        hoy_str = datetime.now().strftime('%Y-%m-%d')
+        
+        # 2. Resetear Estado Visual
         ESTADO_CARGA["activo"] = True
         ESTADO_CARGA["procesados"] = 0
-        ESTADO_CARGA["mensaje"] = f"Iniciando: {rango_inicio}..."
-        ESTADO_CARGA["total_estimado"] = 60 # Estimativo para la animación
+        ESTADO_CARGA["mensaje"] = f"Iniciando barrido desde {inicio_str}..."
+        ESTADO_CARGA["total_estimado"] = 50 
         
-        print(f"🔄 ORDEN LANZADA: {rango_inicio} al {rango_fin}")
+        print(f"🔄 ORDEN DE BARRIDO: {inicio_str} al {hoy_str}")
 
         for ch in current_user.channels:
             if ch.tipo == 'VOX': 
@@ -677,23 +720,18 @@ def lanzar_vox():
                     try: conf = json.loads(ch.config_data)
                     except: pass
                 
-                conf['rango_inicio'] = rango_inicio
-                conf['rango_fin'] = rango_fin
+                # Le decimos al agente que busque desde la fecha que elegiste
+                conf['rango_inicio'] = inicio_str
+                conf['rango_fin'] = hoy_str
+                
                 ch.config_data = json.dumps(conf)
 
         db.session.commit()
         return jsonify({"status": "ok"})
 
     except Exception as e:
-        print(f"🔥 Error 500 lanzar-orden: {e}")
-        return jsonify({"status": "error", "msg": str(e)}), 500
-    except Exception as e:
-        print(f"🔥 Error 500 en lanzar-orden: {e}")
-        traceback.print_exc()
-        return jsonify({"status": "error", "msg": str(e)}), 500
-# A. MODIFICAR: LANZAR TIRADAS (Ahora recibe fecha de filtro)
-# 1. MODIFICAR: LANZAR ORDEN (Ahora guarda la fecha que eliges en el calendario)
-@app.route('/api/lanzar-tiradas', methods=['POST'])
+        print(f"🔥 Error 500: {e}")
+        return jsonify({"status": "error", "msg": str(e)}), 500@app.route('/api/lanzar-tiradas', methods=['POST'])
 @login_required
 def lanzar_tiradas():
     # Recibimos la fecha del frontend (tu HTML envía {fecha_inicio: "YYYY-MM-DD"})
