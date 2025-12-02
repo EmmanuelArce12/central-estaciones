@@ -431,6 +431,67 @@ def fin_tarea_tiradas():
         ch.comando = None # Apagamos la orden/botón en la web
         db.session.commit()
     return jsonify({"status": "ok"})
+# ==========================================
+# [NUEVO] API OPTIMIZACIÓN: VERIFICAR IDs EXISTENTES
+# ==========================================
+@app.route('/api/check-existing-ids', methods=['POST'])
+def check_existing_ids_vox():
+    # 1. Verificar autenticación del agente
+    token = request.headers.get('X-API-TOKEN')
+    ch = Channel.query.filter_by(token=token).first()
+    if not ch or ch.tipo != 'VOX':
+        return jsonify({"status": "error", "msg": "Unauthorized"}), 401
+        
+    user_id = ch.user_id
+    
+    # 2. Recibir lista de IDs a chequear ["2025...", "2025..."]
+    data = request.json or {}
+    incoming_ids = data.get('ids', [])
+    
+    if not incoming_ids:
+        return jsonify({"missing_ids": []})
+
+    try:
+        # 3. Consulta eficiente a la BD: "Dame los IDs que SI tengo de esta lista"
+        # Usamos .in_(...) que es muy rápido en SQL
+        existing_reports = db.session.query(Reporte.id_interno)\
+            .filter(Reporte.user_id == user_id, Reporte.id_interno.in_(incoming_ids))\
+            .all()
+            
+        # Convertimos el resultado a un conjunto (set) para búsqueda rápida
+        existing_ids_set = set(r[0] for r in existing_reports)
+        
+        # 4. Calcular la diferencia: Los que vienen MENOS los que ya tengo = Los que faltan
+        missing_ids = [id_val for id_val in incoming_ids if id_val not in existing_ids_set]
+        
+        print(f"🧐 API Check: Agente envió {len(incoming_ids)}, faltan {len(missing_ids)}.")
+        
+        # Devolvemos solo la lista de los que faltan
+        return jsonify({"missing_ids": missing_ids})
+
+    except Exception as e:
+        print(f"🔥 Error en check-existing-ids: {e}")
+        # Si falla, devolvemos que faltan todos para asegurar que no se pierda data
+        return jsonify({"missing_ids": incoming_ids})
+
+# ==========================================
+# [NUEVO] API PROGRESO RÁPIDO (Para los que saltamos)
+# ==========================================
+@app.route('/api/progreso-rapido', methods=['POST'])
+def progreso_rapido_api():
+    # Esta API solo sirve para mover la barra azul en el frontend
+    # cuando saltamos registros que ya existen.
+    token = request.headers.get('X-API-TOKEN')
+    if not Channel.query.filter_by(token=token).first(): return jsonify({}), 401
+    
+    data = request.json or {}
+    cantidad_saltada = data.get('cantidad', 0)
+    
+    if ESTADO_CARGA["activo"] and cantidad_saltada > 0:
+        ESTADO_CARGA["procesados"] += cantidad_saltada
+        print(f"⏩ Progreso rápido: Sumados {cantidad_saltada} registros existentes.")
+        
+    return jsonify({"status": "ok"})
 @app.route('/api/reportar', methods=['POST'])
 def api_reportar_vox():
     try:
