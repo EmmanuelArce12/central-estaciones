@@ -550,28 +550,34 @@ def api_reportar_vox():
 # ==========================================
 # CORRECCIÓN EN APP.PY - ESTADO FINAL FORZADO
 # ==========================================
+# ==========================================
+# CORRECCIÓN EN APP.PY: RUTAS UNIFICADAS
+# ==========================================
 @app.route('/api/fin-tarea', methods=['POST'])
-def fin_tarea():
+def fin_tarea_unificada():
     try:
+        # 1. Apagar la orden en Base de Datos (Para que el agente deje de trabajar)
         token = request.headers.get('X-API-TOKEN')
-        # Buscamos al canal para apagar el comando
-        ch = Channel.query.filter_by(token=token).first()
-        if ch:
-            ch.comando = None
-            db.session.commit()
-        
-        # FUERZA BRUTA: Reseteamos las variables globales de progreso
+        if token:
+            ch = Channel.query.filter_by(token=token).first()
+            if ch:
+                ch.comando = None
+                db.session.commit()
+
+        # 2. Apagar la Barra Visual (Para que el HTML muestre 100%)
         ESTADO_CARGA["activo"] = False
         ESTADO_CARGA["mensaje"] = "✅ Carga Completa"
-        # Igualamos procesados al total para que matemáticamente de 100%
+        
+        # Forzamos matemáticamente el 100%
         if ESTADO_CARGA["total_estimado"] > 0:
             ESTADO_CARGA["procesados"] = ESTADO_CARGA["total_estimado"]
         else:
             ESTADO_CARGA["procesados"] = 1
             ESTADO_CARGA["total_estimado"] = 1
             
-        print("🏁 SEÑAL DE FIN RECIBIDA: Barra forzada al 100%")
+        print("🏁 FIN TAREA RECIBIDO: Barra liberada al 100%.")
         return jsonify({"status": "ok"})
+        
     except Exception as e:
         print(f"🔥 Error en fin-tarea: {e}")
         return jsonify({"status": "error"}), 500

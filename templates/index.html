@@ -175,20 +175,32 @@
             fetch('/api/estado-progreso')
                 .then(r => r.json())
                 .then(d => {
-                    if (d.activo) {
+                    // PARCHE DE SEGURIDAD:
+                    // Si el mensaje dice "Completa", asumimos éxito aunque d.activo sea true
+                    const tareaTerminada = d.mensaje && d.mensaje.includes("Completa");
+
+                    if (d.activo && !tareaTerminada) {
+                        // Sigue trabajando...
                         setEstadoBoton(true);
                         document.getElementById('progress-panel').style.display = 'block';
                         actualizarBarra(d.porcentaje, d.mensaje);
                         if(!pollInterval) pollInterval = setInterval(verificarEstadoCarga, 1500);
-                    } else if (d.porcentaje === 100) {
+                    
+                    } else if (d.porcentaje === 100 || tareaTerminada) {
+                        // ÉXITO (Llegó al 100% O el mensaje dice Completa)
                         actualizarBarra(100, "✅ Carga Completa");
+                        
+                        // Pequeña pausa para ver el 100% y recargar
                         setTimeout(() => {
                             setEstadoBoton(false);
                             document.getElementById('progress-panel').style.display = 'none';
-                            location.reload(); 
-                        }, 2000);
+                            location.reload(); // Recargar para mostrar datos
+                        }, 1500);
+                        
                         if(pollInterval) clearInterval(pollInterval);
+                        
                     } else {
+                        // Inactivo / Cancelado / Error
                         setEstadoBoton(false);
                         document.getElementById('progress-panel').style.display = 'none';
                         if(pollInterval) clearInterval(pollInterval);
