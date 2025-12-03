@@ -992,16 +992,18 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. Localizar cabecera
+        # 2. Localizar cabecera CORRECTA
+        # CORRECCIÓN: Ahora exigimos que la fila tenga "Vendedor" Y "Fecha"
+        # para evitar agarrar tablas de resumen que no tienen fechas.
         fila_tabla = -1
         for i, row in df_raw.iterrows():
             row_str = row.astype(str)
-            if row_str.str.contains('Vendedor').any() and (row_str.str.contains('Importe').any() or row_str.str.contains('Volumen').any()):
+            if row_str.str.contains('Vendedor').any() and row_str.str.contains('Fecha').any():
                 fila_tabla = i
                 break
 
         if fila_tabla == -1: 
-            flash("Error: No se encontró la tabla de ventas en el archivo", "error")
+            flash("Error: No se encontró la tabla de ventas (con columnas Fecha y Vendedor) en el archivo", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
         # 3. Normalizar columnas
@@ -1021,6 +1023,12 @@ def subir_ventas_vendedor():
             if 'Tipo' in c: map_cols[c] = 'TipoPago'
 
         df = df.rename(columns=map_cols)
+        
+        # Verificación de seguridad antes de continuar
+        if 'Fecha' not in df.columns or 'Vendedor' not in df.columns:
+             flash("Error: Faltan columnas críticas (Fecha o Vendedor) tras el mapeo.", "error")
+             return redirect(url_for('ver_ventas_vendedor'))
+
         df = df.dropna(subset=["Vendedor"])
         
         # 4. Procesar Fechas
@@ -1035,33 +1043,23 @@ def subir_ventas_vendedor():
         # LÓGICA DE CRUCE CON TURNOS DE LA VOX (Reporte)
         # ==============================================================================
         
-        # Obtenemos el rango de fechas del archivo para no traer toda la base de datos
         min_fecha = df['Fecha_DT'].min() - timedelta(days=2)
         max_fecha = df['Fecha_DT'].max() + timedelta(days=2)
 
-        # Traemos los reportes (cierres de turno) del usuario en ese rango
-        # Asumimos que Reporte tiene: fecha_operativa, turno, hora_apertura, hora_cierre
+        # Traemos los reportes (cierres de turno)
         reportes_db = Reporte.query.filter(
             Reporte.user_id == current_user.id,
             Reporte.hora_apertura >= min_fecha,
             Reporte.hora_cierre <= max_fecha
         ).all()
 
-        # Función para buscar a qué turno pertenece una venta
         def buscar_turno_vox(timestamp_venta):
-            # Recorremos los reportes para ver en qué intervalo cae la venta
             for r in reportes_db:
                 if r.hora_apertura and r.hora_cierre:
-                    # Damos un margen de tolerancia de unos segundos por si acaso
                     if r.hora_apertura <= timestamp_venta <= r.hora_cierre:
                         return r.fecha_operativa, r.turno
-            
-            # Si no encontramos reporte (ej: no se subió el cierre aun), usamos la fecha calendario
-            # y marcamos como 'Sin Asignar' o inferimos algo simple
             return timestamp_venta.strftime('%Y-%m-%d'), 'Sin Turno'
 
-        # Aplicamos la búsqueda fila por fila
-        # Esto crea dos nuevas columnas: Fecha_Op (la real del turno) y Turno_Op
         datos_turno = df['Fecha_DT'].apply(lambda x: buscar_turno_vox(x))
         df['Fecha_Op'] = [d[0] for d in datos_turno]
         df['Turno_Op'] = [d[1] for d in datos_turno]
@@ -1075,21 +1073,19 @@ def subir_ventas_vendedor():
             if col in df.columns: df[col] = df[col].apply(safe_float)
 
         # 5. Agrupación Final
-        # Agrupamos por Fecha OPERATIVA y TURNO detectado.
-        # Así, si el turno noche termina el día siguiente, las ventas quedan en el día contable correcto.
         agregaciones = { 
             'Litros': 'sum', 
             'Importe': 'sum',
-            'Fecha_DT': 'min' # Para guardar el primer horario como referencia
+            'Fecha_DT': 'min'
         }
         if 'Precio' in df.columns: agregaciones['Precio'] = 'mean'
         if 'DuracionSeg' in df.columns: agregaciones['DuracionSeg'] = 'sum'
         if 'TipoPago' in df.columns: agregaciones['TipoPago'] = 'first'
 
+        # IMPORTANTE: Ahora agrupamos por la Fecha Operativa detectada
         resumen = df.groupby(['Fecha_Op', 'Turno_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
         
         # 6. Guardado en Base de Datos
-        # Borramos lo que hubiera para esas fechas operativas para evitar duplicados al re-subir
         fechas_afectadas = resumen['Fecha_Op'].unique()
         for f in fechas_afectadas:
             VentaVendedor.query.filter_by(user_id=current_user.id, fecha=f).delete()
@@ -1098,13 +1094,9 @@ def subir_ventas_vendedor():
         for _, row in resumen.iterrows():
             hora_ref = row['Fecha_DT'].strftime('%H:%M:%S') if pd.notnull(row['Fecha_DT']) else "00:00:00"
             
-            # Nota: Aunque no tengamos columna 'turno' en VentaVendedor, al guardar
-            # filas separadas para el mismo día (diferenciadas por los datos agrupados),
-            # respetamos la estructura.
-            
             nueva_venta = VentaVendedor(
                 user_id=current_user.id, 
-                fecha=row['Fecha_Op'],         # Usamos la fecha operativa (de la Vox)
+                fecha=row['Fecha_Op'],
                 vendedor=row['Vendedor'], 
                 combustible=row['Combustible'],
                 litros=row['Litros'], 
