@@ -981,7 +981,9 @@ def subir_ventas_vendedor():
     if archivo.filename == '': return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. Lectura robusta del archivo (Excel o CSV)
+        # ---------------------------------------------------------
+        # 1. LECTURA DEL ARCHIVO (Excel o CSV)
+        # ---------------------------------------------------------
         filename = archivo.filename.lower()
         if filename.endswith('.csv'):
             try:
@@ -992,21 +994,24 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. Localizar cabecera CORRECTA
-        # CORRECCIÓN: Ahora exigimos que la fila tenga "Vendedor" Y "Fecha"
-        # para evitar agarrar tablas de resumen que no tienen fechas.
+        # ---------------------------------------------------------
+        # 2. BUSCAR LA TABLA CORRECTA (Evita el KeyError 'Fecha')
+        # ---------------------------------------------------------
         fila_tabla = -1
         for i, row in df_raw.iterrows():
             row_str = row.astype(str)
+            # Buscamos la fila que tenga TANTO 'Vendedor' COMO 'Fecha'
             if row_str.str.contains('Vendedor').any() and row_str.str.contains('Fecha').any():
                 fila_tabla = i
                 break
 
         if fila_tabla == -1: 
-            flash("Error: No se encontró la tabla de ventas (con columnas Fecha y Vendedor) en el archivo", "error")
+            flash("Error: No se encontró la tabla de ventas (con columnas 'Fecha' y 'Vendedor').", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 3. Normalizar columnas
+        # ---------------------------------------------------------
+        # 3. PROCESAR COLUMNAS
+        # ---------------------------------------------------------
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
         df.columns = df.columns.astype(str).str.strip().str.title()
@@ -1024,47 +1029,63 @@ def subir_ventas_vendedor():
 
         df = df.rename(columns=map_cols)
         
-        # Verificación de seguridad antes de continuar
-        if 'Fecha' not in df.columns or 'Vendedor' not in df.columns:
-             flash("Error: Faltan columnas críticas (Fecha o Vendedor) tras el mapeo.", "error")
-             return redirect(url_for('ver_ventas_vendedor'))
+        # Validación extra de seguridad
+        if 'Fecha' not in df.columns:
+            flash("Error: La columna 'Fecha' no se detectó correctamente.", "error")
+            return redirect(url_for('ver_ventas_vendedor'))
 
         df = df.dropna(subset=["Vendedor"])
         
-        # 4. Procesar Fechas
+        # Convertir fecha
         df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Fecha_DT'])
 
         if df.empty:
-            flash("Error: No se encontraron fechas válidas.", "error")
+            flash("Error: No se encontraron registros con fecha válida.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # ==============================================================================
-        # LÓGICA DE CRUCE CON TURNOS DE LA VOX (Reporte)
-        # ==============================================================================
+        # ---------------------------------------------------------
+        # 4. OPTIMIZACIÓN DE MEMORIA (CLAVE PARA EVITAR SIGKILL)
+        # ---------------------------------------------------------
+        # En lugar de consultar la DB dentro del loop, sacamos los datos una sola vez.
         
         min_fecha = df['Fecha_DT'].min() - timedelta(days=2)
         max_fecha = df['Fecha_DT'].max() + timedelta(days=2)
 
-        # Traemos los reportes (cierres de turno)
         reportes_db = Reporte.query.filter(
             Reporte.user_id == current_user.id,
             Reporte.hora_apertura >= min_fecha,
             Reporte.hora_cierre <= max_fecha
         ).all()
 
-        def buscar_turno_vox(timestamp_venta):
-            for r in reportes_db:
-                if r.hora_apertura and r.hora_cierre:
-                    if r.hora_apertura <= timestamp_venta <= r.hora_cierre:
-                        return r.fecha_operativa, r.turno
+        # Convertimos objetos SQLAlchemy a lista de diccionarios ligera
+        # Esto evita problemas de conexión y reduce uso de RAM drasticamente
+        cache_turnos = []
+        for r in reportes_db:
+            if r.hora_apertura and r.hora_cierre:
+                cache_turnos.append({
+                    'inicio': r.hora_apertura,
+                    'fin': r.hora_cierre,
+                    'fecha_op': r.fecha_operativa,
+                    'turno': r.turno
+                })
+
+        # Función optimizada que usa la lista en memoria (rápida)
+        def buscar_turno_optimizado(timestamp_venta):
+            for turno in cache_turnos:
+                if turno['inicio'] <= timestamp_venta <= turno['fin']:
+                    return turno['fecha_op'], turno['turno']
             return timestamp_venta.strftime('%Y-%m-%d'), 'Sin Turno'
 
-        datos_turno = df['Fecha_DT'].apply(lambda x: buscar_turno_vox(x))
+        # Aplicamos la búsqueda
+        datos_turno = df['Fecha_DT'].apply(buscar_turno_optimizado)
+        
         df['Fecha_Op'] = [d[0] for d in datos_turno]
         df['Turno_Op'] = [d[1] for d in datos_turno]
 
-        # Limpieza de numéricos
+        # ---------------------------------------------------------
+        # 5. LIMPIEZA Y AGRUPADO
+        # ---------------------------------------------------------
         def safe_float(x):
             try: return float(str(x).replace('.','').replace(',','.'))
             except: return 0.0
@@ -1072,7 +1093,6 @@ def subir_ventas_vendedor():
         for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
             if col in df.columns: df[col] = df[col].apply(safe_float)
 
-        # 5. Agrupación Final
         agregaciones = { 
             'Litros': 'sum', 
             'Importe': 'sum',
@@ -1082,45 +1102,56 @@ def subir_ventas_vendedor():
         if 'DuracionSeg' in df.columns: agregaciones['DuracionSeg'] = 'sum'
         if 'TipoPago' in df.columns: agregaciones['TipoPago'] = 'first'
 
-        # IMPORTANTE: Ahora agrupamos por la Fecha Operativa detectada
+        # Agrupar por la Fecha Operativa detectada
         resumen = df.groupby(['Fecha_Op', 'Turno_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
         
-        # 6. Guardado en Base de Datos
-        fechas_afectadas = resumen['Fecha_Op'].unique()
-        for f in fechas_afectadas:
-            VentaVendedor.query.filter_by(user_id=current_user.id, fecha=f).delete()
-        
-        count = 0
-        for _, row in resumen.iterrows():
-            hora_ref = row['Fecha_DT'].strftime('%H:%M:%S') if pd.notnull(row['Fecha_DT']) else "00:00:00"
+        # ---------------------------------------------------------
+        # 6. GUARDADO TRANSACCIONAL
+        # ---------------------------------------------------------
+        try:
+            fechas_afectadas = resumen['Fecha_Op'].unique()
             
-            nueva_venta = VentaVendedor(
-                user_id=current_user.id, 
-                fecha=row['Fecha_Op'],
-                vendedor=row['Vendedor'], 
-                combustible=row['Combustible'],
-                litros=row['Litros'], 
-                monto=row['Importe'], 
-                precio=row.get('Precio',0), 
-                primer_horario=hora_ref, 
-                tipo_pago=str(row.get('TipoPago','-')), 
-                duracion_seg=row.get('DuracionSeg',0)
-            )
-            db.session.add(nueva_venta)
-            count += 1
-        
-        db.session.commit()
-        
-        ultima_fecha = sorted(fechas_afectadas)[-1] if len(fechas_afectadas) > 0 else datetime.now().strftime('%Y-%m-%d')
-        flash(f"Procesado correctamente: {count} registros distribuidos en {len(fechas_afectadas)} días operativos.", "success")
-        return redirect(url_for('ver_ventas_vendedor', fecha=ultima_fecha))
+            # Borrar datos viejos de esas fechas
+            if len(fechas_afectadas) > 0:
+                VentaVendedor.query.filter(
+                    VentaVendedor.user_id == current_user.id, 
+                    VentaVendedor.fecha.in_(fechas_afectadas)
+                ).delete(synchronize_session=False)
+
+            registros_nuevos = []
+            for _, row in resumen.iterrows():
+                hora_ref = row['Fecha_DT'].strftime('%H:%M:%S') if pd.notnull(row['Fecha_DT']) else "00:00:00"
+                
+                registros_nuevos.append(VentaVendedor(
+                    user_id=current_user.id, 
+                    fecha=row['Fecha_Op'],
+                    vendedor=row['Vendedor'], 
+                    combustible=row['Combustible'],
+                    litros=row['Litros'], 
+                    monto=row['Importe'], 
+                    precio=row.get('Precio',0), 
+                    primer_horario=hora_ref, 
+                    tipo_pago=str(row.get('TipoPago','-')), 
+                    duracion_seg=row.get('DuracionSeg',0)
+                ))
+            
+            # Insertar en bloque (más rápido y seguro)
+            db.session.add_all(registros_nuevos)
+            db.session.commit()
+            
+            count = len(registros_nuevos)
+            ultima_fecha = sorted(fechas_afectadas)[-1] if len(fechas_afectadas) > 0 else datetime.now().strftime('%Y-%m-%d')
+            flash(f"Éxito: {count} registros procesados.", "success")
+            return redirect(url_for('ver_ventas_vendedor', fecha=ultima_fecha))
+
+        except Exception as e_db:
+            db.session.rollback()
+            raise e_db
 
     except Exception as e:
         traceback.print_exc()
         flash(f"Error procesando el archivo: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
-# --- MÓDULO TIRADAS (CANAL 2) ---
-
 # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
