@@ -981,26 +981,41 @@ def subir_ventas_vendedor():
     if archivo.filename == '': return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        df_raw = pd.read_excel(archivo, header=None)
+        # 1. Lectura robusta del archivo (Excel o CSV)
+        filename = archivo.filename.lower()
+        if filename.endswith('.csv'):
+            try:
+                df_raw = pd.read_csv(archivo, header=None)
+            except:
+                archivo.seek(0)
+                df_raw = pd.read_csv(archivo, sep=';', header=None)
+        else:
+            df_raw = pd.read_excel(archivo, header=None)
+
+        # 2. Localizar cabecera
         fila_tabla = -1
         for i, row in df_raw.iterrows():
-            if row.astype(str).str.contains('Vendedor').any() and row.astype(str).str.contains('Importe').any():
-                fila_tabla = i; break
+            row_str = row.astype(str)
+            if row_str.str.contains('Vendedor').any() and (row_str.str.contains('Importe').any() or row_str.str.contains('Volumen').any()):
+                fila_tabla = i
+                break
 
-        if fila_tabla == -1: flash("Error: Formato no reconocido", "error"); return redirect(url_for('ver_ventas_vendedor'))
+        if fila_tabla == -1: 
+            flash("Error: No se encontró la tabla de ventas en el archivo", "error")
+            return redirect(url_for('ver_ventas_vendedor'))
 
+        # 3. Normalizar columnas
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
         df.columns = df.columns.astype(str).str.strip().str.title()
         
-        # Mapeo flexible
         map_cols = {}
         for c in df.columns:
             if 'Fecha' in c: map_cols[c] = 'Fecha'
             if 'Vendedor' in c: map_cols[c] = 'Vendedor'
-            if 'Producto' in c: map_cols[c] = 'Combustible'
-            if 'Vol' in c: map_cols[c] = 'Litros'
-            if 'Importe' in c: map_cols[c] = 'Importe'
+            if 'Producto' in c or 'Combustible' in c: map_cols[c] = 'Combustible'
+            if 'Vol' in c or 'Litros' in c: map_cols[c] = 'Litros'
+            if 'Importe' in c or 'Monto' in c or 'Total' in c: map_cols[c] = 'Importe'
             if 'Precio' in c: map_cols[c] = 'Precio'
             if 'Duracion' in c or 'Duración' in c: map_cols[c] = 'DuracionSeg'
             if 'Tipo' in c: map_cols[c] = 'TipoPago'
@@ -1008,11 +1023,50 @@ def subir_ventas_vendedor():
         df = df.rename(columns=map_cols)
         df = df.dropna(subset=["Vendedor"])
         
+        # 4. Procesar Fechas
         df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-        if df['Fecha_DT'].dropna().empty: flash("Sin fechas válidas", "error"); return redirect(url_for('ver_ventas_vendedor'))
+        df = df.dropna(subset=['Fecha_DT'])
+
+        if df.empty:
+            flash("Error: No se encontraron fechas válidas.", "error")
+            return redirect(url_for('ver_ventas_vendedor'))
+
+        # ==============================================================================
+        # LÓGICA DE CRUCE CON TURNOS DE LA VOX (Reporte)
+        # ==============================================================================
         
-        fecha_auto = df['Fecha_DT'].dropna().dt.date.mode()[0].strftime('%Y-%m-%d')
-        
+        # Obtenemos el rango de fechas del archivo para no traer toda la base de datos
+        min_fecha = df['Fecha_DT'].min() - timedelta(days=2)
+        max_fecha = df['Fecha_DT'].max() + timedelta(days=2)
+
+        # Traemos los reportes (cierres de turno) del usuario en ese rango
+        # Asumimos que Reporte tiene: fecha_operativa, turno, hora_apertura, hora_cierre
+        reportes_db = Reporte.query.filter(
+            Reporte.user_id == current_user.id,
+            Reporte.hora_apertura >= min_fecha,
+            Reporte.hora_cierre <= max_fecha
+        ).all()
+
+        # Función para buscar a qué turno pertenece una venta
+        def buscar_turno_vox(timestamp_venta):
+            # Recorremos los reportes para ver en qué intervalo cae la venta
+            for r in reportes_db:
+                if r.hora_apertura and r.hora_cierre:
+                    # Damos un margen de tolerancia de unos segundos por si acaso
+                    if r.hora_apertura <= timestamp_venta <= r.hora_cierre:
+                        return r.fecha_operativa, r.turno
+            
+            # Si no encontramos reporte (ej: no se subió el cierre aun), usamos la fecha calendario
+            # y marcamos como 'Sin Asignar' o inferimos algo simple
+            return timestamp_venta.strftime('%Y-%m-%d'), 'Sin Turno'
+
+        # Aplicamos la búsqueda fila por fila
+        # Esto crea dos nuevas columnas: Fecha_Op (la real del turno) y Turno_Op
+        datos_turno = df['Fecha_DT'].apply(lambda x: buscar_turno_vox(x))
+        df['Fecha_Op'] = [d[0] for d in datos_turno]
+        df['Turno_Op'] = [d[1] for d in datos_turno]
+
+        # Limpieza de numéricos
         def safe_float(x):
             try: return float(str(x).replace('.','').replace(',','.'))
             except: return 0.0
@@ -1020,30 +1074,59 @@ def subir_ventas_vendedor():
         for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
             if col in df.columns: df[col] = df[col].apply(safe_float)
 
-        agregaciones = { 'Fecha': 'first', 'Litros': 'sum', 'Importe': 'sum' }
-        if 'Precio' in df.columns: agregaciones['Precio'] = 'first'
-        if 'TipoPago' in df.columns: agregaciones['TipoPago'] = 'first'
+        # 5. Agrupación Final
+        # Agrupamos por Fecha OPERATIVA y TURNO detectado.
+        # Así, si el turno noche termina el día siguiente, las ventas quedan en el día contable correcto.
+        agregaciones = { 
+            'Litros': 'sum', 
+            'Importe': 'sum',
+            'Fecha_DT': 'min' # Para guardar el primer horario como referencia
+        }
+        if 'Precio' in df.columns: agregaciones['Precio'] = 'mean'
         if 'DuracionSeg' in df.columns: agregaciones['DuracionSeg'] = 'sum'
+        if 'TipoPago' in df.columns: agregaciones['TipoPago'] = 'first'
 
-        resumen = df.sort_values('Fecha_DT').groupby(['Vendedor', 'Combustible']).agg(agregaciones).reset_index()
+        resumen = df.groupby(['Fecha_Op', 'Turno_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
         
-        VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_auto).delete()
+        # 6. Guardado en Base de Datos
+        # Borramos lo que hubiera para esas fechas operativas para evitar duplicados al re-subir
+        fechas_afectadas = resumen['Fecha_Op'].unique()
+        for f in fechas_afectadas:
+            VentaVendedor.query.filter_by(user_id=current_user.id, fecha=f).delete()
         
+        count = 0
         for _, row in resumen.iterrows():
-            hora = pd.to_datetime(row['Fecha']).strftime('%H:%M:%S') if pd.notnull(row['Fecha']) else "-"
+            hora_ref = row['Fecha_DT'].strftime('%H:%M:%S') if pd.notnull(row['Fecha_DT']) else "00:00:00"
             
-            db.session.add(VentaVendedor(
-                user_id=current_user.id, fecha=fecha_auto, vendedor=row['Vendedor'], combustible=row['Combustible'],
-                litros=row['Litros'], monto=row['Importe'], precio=row.get('Precio',0), primer_horario=hora,
-                tipo_pago=str(row.get('TipoPago','-')), duracion_seg=row.get('DuracionSeg',0)
-            ))
+            # Nota: Aunque no tengamos columna 'turno' en VentaVendedor, al guardar
+            # filas separadas para el mismo día (diferenciadas por los datos agrupados),
+            # respetamos la estructura.
+            
+            nueva_venta = VentaVendedor(
+                user_id=current_user.id, 
+                fecha=row['Fecha_Op'],         # Usamos la fecha operativa (de la Vox)
+                vendedor=row['Vendedor'], 
+                combustible=row['Combustible'],
+                litros=row['Litros'], 
+                monto=row['Importe'], 
+                precio=row.get('Precio',0), 
+                primer_horario=hora_ref, 
+                tipo_pago=str(row.get('TipoPago','-')), 
+                duracion_seg=row.get('DuracionSeg',0)
+            )
+            db.session.add(nueva_venta)
+            count += 1
         
         db.session.commit()
-        return redirect(url_for('ver_ventas_vendedor', fecha=fecha_auto))
+        
+        ultima_fecha = sorted(fechas_afectadas)[-1] if len(fechas_afectadas) > 0 else datetime.now().strftime('%Y-%m-%d')
+        flash(f"Procesado correctamente: {count} registros distribuidos en {len(fechas_afectadas)} días operativos.", "success")
+        return redirect(url_for('ver_ventas_vendedor', fecha=ultima_fecha))
 
     except Exception as e:
-        flash(f"Error: {e}", "error"); return redirect(url_for('ver_ventas_vendedor'))
-
+        traceback.print_exc()
+        flash(f"Error procesando el archivo: {str(e)}", "error")
+        return redirect(url_for('ver_ventas_vendedor'))
 # --- MÓDULO TIRADAS (CANAL 2) ---
 
 # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
