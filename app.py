@@ -974,7 +974,6 @@ def ver_ventas_vendedor():
     return render_template('ventas_vendedor.html', ventas_por_turno=res, fecha=fecha, t_litros=t_l, t_plata=t_p, limites=limites, user=current_user)
 # Asegúrate de tener estos imports
 from sqlalchemy import insert, distinct
-
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
@@ -995,22 +994,28 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. BUSCAR ENCABEZADO CORRECTO
+        # 2. BUSCAR ENCABEZADO (CORRECCIÓN: CASE-INSENSITIVE)
+        # Ahora buscamos 'vendedor' y 'fecha' en minúsculas para que coincida siempre
         fila_tabla = -1
-        # Buscamos en las primeras 50 filas
         for i, row in df_raw.head(50).iterrows():
-            row_str = row.astype(str)
-            if row_str.str.contains('Vendedor').any() and row_str.str.contains('Fecha').any():
+            # Convertimos toda la fila a texto y a MINÚSCULAS para buscar
+            row_str = row.astype(str).str.lower()
+            
+            # Buscamos las palabras clave en minúscula
+            if row_str.str.contains('vendedor', na=False).any() and row_str.str.contains('fecha', na=False).any():
                 fila_tabla = i
                 break
 
         if fila_tabla == -1: 
-            flash("Error: No se encontró la tabla de ventas (columnas Fecha/Vendedor).", "error")
+            flash("Error: No se encontró la fila de cabecera (debe tener columnas 'Fecha' y 'Vendedor').", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 3. NORMALIZAR DATOS
+        # 3. NORMALIZAR COLUMNAS
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
+        
+        # Convertimos las columnas detectadas a Title Case (ej: "vendedor" -> "Vendedor")
+        # Esto nos permite estandarizar el resto del código sin importar cómo venga el Excel
         df.columns = df.columns.astype(str).str.strip().str.title()
         
         map_cols = {}
@@ -1026,7 +1031,9 @@ def subir_ventas_vendedor():
 
         df = df.rename(columns=map_cols)
         
-        # Reducir columnas para ahorrar memoria
+        # --- (El resto del código sigue igual, ya que 'df' ahora tiene las columnas estandarizadas) ---
+        
+        # Reducir columnas
         cols_to_keep = ['Fecha', 'Vendedor', 'Combustible', 'Litros', 'Importe', 'Precio', 'DuracionSeg', 'TipoPago']
         cols_existing = [c for c in cols_to_keep if c in df.columns]
         df = df[cols_existing] 
@@ -1038,61 +1045,39 @@ def subir_ventas_vendedor():
         df = df.dropna(subset=['Fecha_DT'])
 
         if df.empty:
-            flash("Sin fechas válidas en el archivo.", "error"); return redirect(url_for('ver_ventas_vendedor'))
+            flash("Sin fechas válidas.", "error"); return redirect(url_for('ver_ventas_vendedor'))
 
-        # Crear columna string para comparaciones fáciles
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
-        # ==============================================================================
-        # 🧠 LÓGICA INTELIGENTE: FILTRAR LO YA CARGADO
-        # ==============================================================================
-        
-        # 1. ¿Qué fechas trae el archivo?
+        # FILTRAR LO YA CARGADO
         fechas_archivo = df['Fecha_Str'].unique().tolist()
         
-        # 2. ¿Qué fechas YA existen en la DB para este usuario?
-        # Hacemos una consulta ligera (solo trae las fechas, no todo el objeto)
         fechas_existentes_query = db.session.query(VentaVendedor.fecha).filter(
             VentaVendedor.user_id == current_user.id,
             VentaVendedor.fecha.in_(fechas_archivo)
         ).distinct().all()
         
-        fechas_ya_cargadas = set([f[0] for f in fechas_existentes_query]) # Convertir a Set para búsqueda rápida
-        
-        # 3. Filtrar el DataFrame: Nos quedamos SOLO con lo NUEVO
+        fechas_ya_cargadas = set([f[0] for f in fechas_existentes_query])
         df_nuevos = df[~df['Fecha_Str'].isin(fechas_ya_cargadas)].copy()
         
         if df_nuevos.empty:
-            flash(f"⚠️ El archivo no contenía datos nuevos. Todas las fechas ({len(fechas_archivo)}) ya estaban cargadas.", "warning")
-            # Redirigir a la última fecha del archivo original
-            ultima = sorted(fechas_archivo)[-1]
-            return redirect(url_for('ver_ventas_vendedor', fecha=ultima))
+            flash(f"⚠️ El archivo no contenía datos nuevos ({len(fechas_archivo)} fechas ya cargadas).", "warning")
+            return redirect(url_for('ver_ventas_vendedor', fecha=sorted(fechas_archivo)[-1]))
 
-        # ==============================================================================
-        # ✂️ LÓGICA DE TIJERA (Chunking de 15 días sobre lo NUEVO)
-        # ==============================================================================
+        # CORTE DE 15 DÍAS
         dias_unicos_nuevos = sorted(df_nuevos['Fecha_DT'].dt.date.unique())
-        
         mensaje_aviso = ""
         
         if len(dias_unicos_nuevos) > 15:
             dias_permitidos = dias_unicos_nuevos[:15]
             fecha_corte = dias_permitidos[-1]
-            
-            # Cortamos el DF para procesar solo los primeros 15 días DISPONIBLES
             df_final = df_nuevos[df_nuevos['Fecha_DT'].dt.date.isin(dias_permitidos)].copy()
-            
-            dias_restantes = len(dias_unicos_nuevos) - 15
-            mensaje_aviso = f"💾 Se procesaron 15 días nuevos (hasta el {fecha_corte.strftime('%d/%m')}). Quedan {dias_restantes} días pendientes en este archivo. Vuelve a subirlo para terminar."
+            mensaje_aviso = f"💾 Se procesaron 15 días nuevos (hasta el {fecha_corte.strftime('%d/%m')}). Quedan pendientes. Vuelve a subir el archivo para continuar."
         else:
             df_final = df_nuevos
             mensaje_aviso = f"✅ Se procesaron {len(dias_unicos_nuevos)} días nuevos correctamente."
 
-        # ==============================================================================
-        # 🚀 PROCESAMIENTO (Optimizado en Memoria)
-        # ==============================================================================
-        
-        # Cache de Turnos
+        # PROCESAR TURNOS (CACHE)
         min_f = df_final['Fecha_DT'].min() - timedelta(days=2)
         max_f = df_final['Fecha_DT'].max() + timedelta(days=2)
 
@@ -1118,7 +1103,7 @@ def subir_ventas_vendedor():
         resultados = [buscar_turno_memoria(x) for x in df_final['Fecha_DT']]
         df_final['Fecha_Op'] = [x[0] for x in resultados]
 
-        # Limpieza Numérica
+        # LIMPIEZA NUMÉRICA
         def safe_float(x):
             try: return float(str(x).replace('.','').replace(',','.'))
             except: return 0.0
@@ -1126,7 +1111,7 @@ def subir_ventas_vendedor():
         for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
             if col in df_final.columns: df_final[col] = df_final[col].apply(safe_float)
 
-        # Agrupar
+        # AGRUPAR
         agregaciones = { 'Litros': 'sum', 'Importe': 'sum', 'Fecha_DT': 'min' }
         if 'Precio' in df_final.columns: agregaciones['Precio'] = 'mean'
         if 'DuracionSeg' in df_final.columns: agregaciones['DuracionSeg'] = 'sum'
@@ -1134,20 +1119,22 @@ def subir_ventas_vendedor():
 
         resumen = df_final.groupby(['Fecha_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
 
-        # Bulk Insert
+        # BULK INSERT (Aquí usamos las claves en minúscula que pide tu modelo SQL)
         bulk_data = []
         user_id_val = current_user.id
         
         for _, row in resumen.iterrows():
             hora_ref = row['Fecha_DT'].strftime('%H:%M:%S') if pd.notnull(row['Fecha_DT']) else "00:00:00"
             
+            # IMPORTANTE: Aquí asignamos los valores a las columnas de la DB
+            # Las claves ('vendedor', 'combustible') coinciden con tu modelo VentaVendedor
             bulk_data.append({
                 'user_id': user_id_val,
                 'fecha': row['Fecha_Op'],
-                'vendedor': row['Vendedor'],
-                'combustible': row['Combustible'],
+                'vendedor': row['Vendedor'],       # DataFrame TitleCase -> DB lowercase
+                'combustible': row['Combustible'], # DataFrame TitleCase -> DB lowercase
                 'litros': row['Litros'],
-                'monto': row['Importe'],
+                'monto': row['Importe'],           # DataFrame 'Importe' -> DB 'monto'
                 'precio': row.get('Precio', 0),
                 'primer_horario': hora_ref,
                 'tipo_pago': str(row.get('TipoPago', '-')),
@@ -1155,18 +1142,14 @@ def subir_ventas_vendedor():
             })
 
         if bulk_data:
-            # NOTA: Ya no hace falta borrar porque filtramos arriba lo que ya existía.
-            # Solo insertamos lo nuevo.
             db.session.bulk_insert_mappings(VentaVendedor, bulk_data)
             db.session.commit()
 
-        # Flash inteligente
         if "Quedan" in mensaje_aviso:
             flash(mensaje_aviso, "warning")
         else:
             flash(mensaje_aviso, "success")
             
-        # Redirigir a la última fecha CARGADA AHORA
         if not resumen.empty:
             ultima_fecha = sorted(resumen['Fecha_Op'].unique())[-1]
         else:
@@ -1178,7 +1161,8 @@ def subir_ventas_vendedor():
         db.session.rollback()
         traceback.print_exc()
         flash(f"Error crítico: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))# --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
+        return redirect(url_for('ver_ventas_vendedor'))
+    # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
