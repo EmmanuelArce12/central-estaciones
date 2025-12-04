@@ -949,58 +949,82 @@ def ver_ventas_vendedor():
     # 1. TRAEMOS LOS REPORTES DE CAJA (VOX)
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     
-    # Preparamos límites horarios y acumulador de VOX
-    limites = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
-    totales_vox = { "Mañana": 0.0, "Tarde": 0.0, "Noche": 0.0 } # <--- Nuevo acumulador
-
+    # Preparamos límites horarios (para clasificación) y acumulador de VOX (para auditoría)
+    limites_turno = { "Mañana": [], "Tarde": [], "Noche": [] } # Guardaremos rangos [inicio, fin] por turno
+    totales_vox = { "Mañana": 0.0, "Tarde": 0.0, "Noche": 0.0 } 
+    
+    # 2. PROCESAMIENTO DE LIMITES Y TOTALES VOX
     for r in reportes:
-        if r.turno in limites:
+        if r.turno in totales_vox:
             # Acumulamos dinero del reporte VOX
             totales_vox[r.turno] += (r.monto or 0.0) 
             
-            # Lógica existente de horarios
-            if r.hora_apertura:
-                t = r.hora_apertura.time()
-                if limites[r.turno]["inicio"] is None or t < limites[r.turno]["inicio"]: limites[r.turno]["inicio"] = t
-            if r.hora_cierre:
-                t = r.hora_cierre.time()
-                if limites[r.turno]["fin"] is None or t > limites[r.turno]["fin"]: limites[r.turno]["fin"] = t
+            # Guardamos los límites exactos de este reporte
+            if r.hora_apertura and r.hora_cierre:
+                # Almacenamos el objeto datetime completo para la comparación estricta
+                limites_turno[r.turno].append({
+                    'inicio_dt': r.hora_apertura,
+                    'fin_dt': r.hora_cierre,
+                    'inicio_time': r.hora_apertura.time(),
+                    'fin_time': r.hora_cierre.time(),
+                })
 
-    # 2. TRAEMOS VENTAS DETALLADAS (Vendedor)
+    # 3. TRAEMOS VENTAS DETALLADAS (Vendedor)
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
     res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
     
     t_l = 0; t_p = 0
     
-    # 3. CLASIFICACIÓN (Tu lógica existente)
+    # 4. LÓGICA DE CLASIFICACIÓN ESTRICTA (Basada en la hora exacta)
     for v in ventas:
         t_l += v.litros; t_p += v.monto; assigned = False
-        try: h = datetime.strptime(v.primer_horario, "%H:%M:%S").time()
-        except: res["Sin Asignar"].append(v); continue
         
-        for t, l in limites.items():
-            if l["inicio"] and l["fin"]:
-                if (l["inicio"] < l["fin"] and l["inicio"] <= h <= l["fin"]) or (l["inicio"] > l["fin"] and (h >= l["inicio"] or h <= l["fin"])):
-                    res[t].append(v); assigned = True; break
-        
+        try: 
+            # Reconstruir el objeto datetime completo de la venta para comparar con los límites VOX
+            # Usamos la fecha del reporte Vendedor (v.fecha) + la hora (v.primer_horario)
+            dt_venta_str = f"{v.fecha} {v.primer_horario}"
+            dt_venta = datetime.strptime(dt_venta_str, '%Y-%m-%d %H:%M:%S')
+        except: 
+            res["Sin Asignar"].append(v); continue # No se pudo parsear fecha/hora
+
+        # Recorrer los límites de todos los turnos del día
+        for turno, rangos in limites_turno.items():
+            for rango in rangos:
+                # COMPARACIÓN ESTRICTA: Si la hora de la venta cae dentro del rango [apertura, cierre] del reporte VOX
+                if rango['inicio_dt'] <= dt_venta <= rango['fin_dt']:
+                    res[turno].append(v); 
+                    assigned = True; 
+                    break # Se encontró el turno, pasar a la siguiente venta
+            if assigned: break
+
+        # Si no fue asignada a NINGÚN reporte VOX específico (posiblemente venta de otro día o fuera de rango)
         if not assigned:
-            hr = h.hour
+            # Si no hay match estricto, usamos la asignación horaria general como ÚLTIMO RECURSO
+            hr = dt_venta.hour
             if 6 <= hr < 14: res["Mañana"].append(v)
             elif 14 <= hr < 22: res["Tarde"].append(v)
             else: res["Noche"].append(v)
 
-    # 4. LÓGICA DE COMPARACIÓN (NUEVO)
-    # Calculamos cuánto suman los vendedores en cada turno
+    # 5. LÓGICA DE COMPARACIÓN Y AUDITORÍA (Existente)
     comparativa = {}
-    for turno in ["Mañana", "Tarde", "Noche"]:
-        suma_vendedores = sum(v.monto for v in res[turno])
-        suma_vox = totales_vox[turno]
+    limites_display = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
+    
+    for t in ["Mañana", "Tarde", "Noche"]:
+        # Calcular el rango de visualización
+        if limites_turno[t]:
+            # Encontrar el mínimo de inicio y el máximo de fin de todos los reportes de ese turno
+            min_inicio = min(r['inicio_time'] for r in limites_turno[t])
+            max_fin = max(r['fin_time'] for r in limites_turno[t])
+            limites_display[t]["inicio"] = min_inicio
+            limites_display[t]["fin"] = max_fin
+
+        suma_vendedores = sum(v.monto for v in res[t])
+        suma_vox = totales_vox[t]
         
-        # Usamos una tolerancia de $10 pesos por cuestiones de redondeo decimal
         diferencia = suma_vox - suma_vendedores
         coincide = abs(diferencia) < 10.0 
         
-        comparativa[turno] = {
+        comparativa[t] = {
             "vox": suma_vox,
             "vendedores": suma_vendedores,
             "coincide": coincide,
@@ -1012,9 +1036,9 @@ def ver_ventas_vendedor():
                            fecha=fecha, 
                            t_litros=t_l, 
                            t_plata=t_p, 
-                           limites=limites, 
+                           limites=limites_display, # Usamos los limites_display para mostrar
                            user=current_user,
-                           comparativa=comparativa) # <--- Enviamos esto al HTML# Asegúrate de tener estos imports
+                           comparativa=comparativa)
 from sqlalchemy import insert
 from datetime import timedelta
 import pandas as pd
