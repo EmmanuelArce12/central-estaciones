@@ -974,32 +974,83 @@ def ver_ventas_vendedor():
     t_l = 0; t_p = 0
     
     # 4. LÓGICA DE CLASIFICACIÓN ESTRICTA (Venta vs Rango VOX Individual)
-    for v in ventas:
-        t_l += v.litros; t_p += v.monto; assigned = False
+    # =====================================================
+# 4. NUEVA LÓGICA – CLASIFICACIÓN EXACTA POR RANGOS VOX
+# =====================================================
+
+# Primero unimos los rangos VOX reales por turno
+def construir_rangos_turnos(lista_reportes_dia):
+    rangos = {}
+
+    for r in lista_reportes_dia:
+        turno = r['turno']
+        ap  = r['inicio_dt']
+        ci  = r['fin_dt']
+
+        if turno not in rangos:
+            rangos[turno] = {'ap': ap, 'ci': ci}
+        else:
+            if ap < rangos[turno]['ap']: rangos[turno]['ap'] = ap
+            if ci > rangos[turno]['ci']: rangos[turno]['ci'] = ci
+
+    return {t: (d['ap'], d['ci']) for t, d in rangos.items()}
+
+# Asignar venta a turno segun apertura/cierre VOX
+    def asignar_vox(dt_venta, rangos_ordenados):
+        for idx, (turno, ap, ci) in enumerate(rangos_ordenados):
+
+            # venta dentro del rango
+            if ap <= dt_venta <= ci:
+                return turno
+            
+            # venta DESPUÉS del cierre → siguiente turno
+            if dt_venta > ci:
+                if idx + 1 < len(rangos_ordenados):
+                    return rangos_ordenados[idx + 1][0]
+                else:
+                    return rangos_ordenados[0][0]  # siguiente día
         
-        try: 
+            # venta ANTES de apertura → turno anterior
+            if dt_venta < ap:
+                if idx - 1 >= 0:
+                    return rangos_ordenados[idx - 1][0]
+                else:
+                    return rangos_ordenados[-1][0]
+
+        return "Sin Asignar"
+
+    # Construimos rangos VOX reales para el día
+    rangos = construir_rangos_turnos(lista_reportes_dia)
+
+    # Ordenamos por apertura
+    rangos_ordenados = sorted(
+        [(t, ap, ci) for t, (ap, ci) in rangos.items()],
+        key=lambda x: x[1]
+    )
+
+    # Limpio destino final
+    res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
+
+    # Recorrido de ventas
+    for v in ventas:
+        t_l += v.litros
+        t_p += v.monto
+
+        # Fecha + hora exacta del despacho
+        try:
             dt_venta_str = f"{v.fecha} {v.primer_horario}"
             dt_venta = datetime.strptime(dt_venta_str, '%Y-%m-%d %H:%M:%S')
-        except: 
-            res["Sin Asignar"].append(v); continue 
+        except:
+            res["Sin Asignar"].append(v)
+            continue
 
-        # Iteramos sobre la lista PLANA de reportes (rangos) del día
-        for reporte_rango in lista_reportes_dia:
-            inicio = reporte_rango['inicio_dt']
-            fin = reporte_rango['fin_dt']
-            turno_asignado = reporte_rango['turno']
+        # Aplicar la lógica VOX B (sin fallback horario fijo)
+        turno_destino = asignar_vox(dt_venta, rangos_ordenados)
+        if turno_destino not in res:
+            turno_destino = "Sin Asignar"
 
-            if inicio <= dt_venta <= fin:
-                res[turno_asignado].append(v); 
-                assigned = True; 
-                break 
-        
-        # 5. FALLBACK
-        if not assigned:
-            hr = dt_venta.hour
-            if 6 <= hr < 14: res["Mañana"].append(v)
-            elif 14 <= hr < 22: res["Tarde"].append(v)
-            else: res["Noche"].append(v)
+        res[turno_destino].append(v)
+
 
 
     # 6. LÓGICA DE COMPARACIÓN Y AUDITORÍA
