@@ -972,30 +972,32 @@ def ver_ventas_vendedor():
             elif 14 <= hr < 22: res["Tarde"].append(v)
             else: res["Noche"].append(v)
     return render_template('ventas_vendedor.html', ventas_por_turno=res, fecha=fecha, t_litros=t_l, t_plata=t_p, limites=limites, user=current_user)
+# Asegúrate de tener estos imports
+from sqlalchemy import insert, distinct
+
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
-    # 1. Validación básica
+    # --- VALIDACIÓN BÁSICA ---
     if 'archivo' not in request.files: return redirect(url_for('ver_ventas_vendedor'))
     archivo = request.files['archivo']
     if archivo.filename == '': return redirect(url_for('ver_ventas_vendedor'))
 
     try:
+        # 1. LECTURA DEL ARCHIVO
         filename = archivo.filename.lower()
-        
-        # 2. Lectura optimizada
         if filename.endswith('.csv'):
             try:
-                df_raw = pd.read_csv(archivo, header=None) 
+                df_raw = pd.read_csv(archivo, header=None)
             except:
                 archivo.seek(0)
                 df_raw = pd.read_csv(archivo, sep=';', header=None)
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 3. Buscar encabezado "Vendedor" y "Fecha"
+        # 2. BUSCAR ENCABEZADO CORRECTO
         fila_tabla = -1
-        # Buscamos en las primeras 50 filas para no saturar memoria
+        # Buscamos en las primeras 50 filas
         for i, row in df_raw.head(50).iterrows():
             row_str = row.astype(str)
             if row_str.str.contains('Vendedor').any() and row_str.str.contains('Fecha').any():
@@ -1006,7 +1008,7 @@ def subir_ventas_vendedor():
             flash("Error: No se encontró la tabla de ventas (columnas Fecha/Vendedor).", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 4. Procesar Dataframe y Mapear Columnas
+        # 3. NORMALIZAR DATOS
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla]
         df.columns = df.columns.astype(str).str.strip().str.title()
@@ -1024,53 +1026,80 @@ def subir_ventas_vendedor():
 
         df = df.rename(columns=map_cols)
         
-        # Eliminar columnas basura para liberar memoria
+        # Reducir columnas para ahorrar memoria
         cols_to_keep = ['Fecha', 'Vendedor', 'Combustible', 'Litros', 'Importe', 'Precio', 'DuracionSeg', 'TipoPago']
         cols_existing = [c for c in cols_to_keep if c in df.columns]
         df = df[cols_existing] 
 
         df = df.dropna(subset=["Vendedor"])
         
-        # Conversión de Fecha
+        # Convertir Fecha
         df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Fecha_DT'])
 
         if df.empty:
-            flash("Sin fechas válidas.", "error"); return redirect(url_for('ver_ventas_vendedor'))
+            flash("Sin fechas válidas en el archivo.", "error"); return redirect(url_for('ver_ventas_vendedor'))
+
+        # Crear columna string para comparaciones fáciles
+        df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
         # ==============================================================================
-        # 🛡️ LÓGICA DE CORTE DE 15 DÍAS (SAFETY CUT)
+        # 🧠 LÓGICA INTELIGENTE: FILTRAR LO YA CARGADO
         # ==============================================================================
-        # Obtenemos los días únicos ordenados
-        dias_unicos = sorted(df['Fecha_DT'].dt.date.unique())
         
-        mensaje_corte = ""
-        fecha_corte_str = ""
+        # 1. ¿Qué fechas trae el archivo?
+        fechas_archivo = df['Fecha_Str'].unique().tolist()
         
-        if len(dias_unicos) > 15:
-            # Tomamos solo los primeros 15 días
-            dias_permitidos = dias_unicos[:15]
-            fecha_corte = dias_permitidos[-1] # El día 15
-            fecha_corte_str = fecha_corte.strftime('%d/%m/%Y')
-            
-            # Filtramos el DataFrame para dejar SOLO esos 15 días
-            # Esto asegura que procesemos días completos (con sus turnos noche) y nada más
-            df = df[df['Fecha_DT'].dt.date.isin(dias_permitidos)]
-            
-            mensaje_corte = f"⚠️ AVISO DE SEGURIDAD: El archivo era muy grande. Se procesaron los primeros 15 días (hasta el {fecha_corte_str}). Por favor sube el resto en otro archivo."
+        # 2. ¿Qué fechas YA existen en la DB para este usuario?
+        # Hacemos una consulta ligera (solo trae las fechas, no todo el objeto)
+        fechas_existentes_query = db.session.query(VentaVendedor.fecha).filter(
+            VentaVendedor.user_id == current_user.id,
+            VentaVendedor.fecha.in_(fechas_archivo)
+        ).distinct().all()
         
-        # ==============================================================================
-        # FIN LÓGICA DE CORTE
-        # ==============================================================================
+        fechas_ya_cargadas = set([f[0] for f in fechas_existentes_query]) # Convertir a Set para búsqueda rápida
+        
+        # 3. Filtrar el DataFrame: Nos quedamos SOLO con lo NUEVO
+        df_nuevos = df[~df['Fecha_Str'].isin(fechas_ya_cargadas)].copy()
+        
+        if df_nuevos.empty:
+            flash(f"⚠️ El archivo no contenía datos nuevos. Todas las fechas ({len(fechas_archivo)}) ya estaban cargadas.", "warning")
+            # Redirigir a la última fecha del archivo original
+            ultima = sorted(fechas_archivo)[-1]
+            return redirect(url_for('ver_ventas_vendedor', fecha=ultima))
 
-        # Cache de Turnos (Optimización Memoria 1)
-        min_fecha = df['Fecha_DT'].min() - timedelta(days=2)
-        max_fecha = df['Fecha_DT'].max() + timedelta(days=2)
+        # ==============================================================================
+        # ✂️ LÓGICA DE TIJERA (Chunking de 15 días sobre lo NUEVO)
+        # ==============================================================================
+        dias_unicos_nuevos = sorted(df_nuevos['Fecha_DT'].dt.date.unique())
+        
+        mensaje_aviso = ""
+        
+        if len(dias_unicos_nuevos) > 15:
+            dias_permitidos = dias_unicos_nuevos[:15]
+            fecha_corte = dias_permitidos[-1]
+            
+            # Cortamos el DF para procesar solo los primeros 15 días DISPONIBLES
+            df_final = df_nuevos[df_nuevos['Fecha_DT'].dt.date.isin(dias_permitidos)].copy()
+            
+            dias_restantes = len(dias_unicos_nuevos) - 15
+            mensaje_aviso = f"💾 Se procesaron 15 días nuevos (hasta el {fecha_corte.strftime('%d/%m')}). Quedan {dias_restantes} días pendientes en este archivo. Vuelve a subirlo para terminar."
+        else:
+            df_final = df_nuevos
+            mensaje_aviso = f"✅ Se procesaron {len(dias_unicos_nuevos)} días nuevos correctamente."
+
+        # ==============================================================================
+        # 🚀 PROCESAMIENTO (Optimizado en Memoria)
+        # ==============================================================================
+        
+        # Cache de Turnos
+        min_f = df_final['Fecha_DT'].min() - timedelta(days=2)
+        max_f = df_final['Fecha_DT'].max() + timedelta(days=2)
 
         reportes_data = db.session.query(Reporte.hora_apertura, Reporte.hora_cierre, Reporte.fecha_operativa, Reporte.turno).filter(
             Reporte.user_id == current_user.id,
-            Reporte.hora_apertura >= min_fecha,
-            Reporte.hora_cierre <= max_fecha
+            Reporte.hora_apertura >= min_f,
+            Reporte.hora_cierre <= max_f
         ).all()
 
         cache_turnos = [{
@@ -1086,8 +1115,8 @@ def subir_ventas_vendedor():
                     return t['fecha_op'], t['turno']
             return timestamp_venta.strftime('%Y-%m-%d'), 'Sin Turno'
 
-        resultados_turno = [buscar_turno_memoria(x) for x in df['Fecha_DT']]
-        df['Fecha_Op'] = [x[0] for x in resultados_turno]
+        resultados = [buscar_turno_memoria(x) for x in df_final['Fecha_DT']]
+        df_final['Fecha_Op'] = [x[0] for x in resultados]
 
         # Limpieza Numérica
         def safe_float(x):
@@ -1095,27 +1124,17 @@ def subir_ventas_vendedor():
             except: return 0.0
 
         for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
-            if col in df.columns: df[col] = df[col].apply(safe_float)
+            if col in df_final.columns: df_final[col] = df_final[col].apply(safe_float)
 
-        # Agrupación
+        # Agrupar
         agregaciones = { 'Litros': 'sum', 'Importe': 'sum', 'Fecha_DT': 'min' }
-        if 'Precio' in df.columns: agregaciones['Precio'] = 'mean'
-        if 'DuracionSeg' in df.columns: agregaciones['DuracionSeg'] = 'sum'
-        if 'TipoPago' in df.columns: agregaciones['TipoPago'] = 'first'
+        if 'Precio' in df_final.columns: agregaciones['Precio'] = 'mean'
+        if 'DuracionSeg' in df_final.columns: agregaciones['DuracionSeg'] = 'sum'
+        if 'TipoPago' in df_final.columns: agregaciones['TipoPago'] = 'first'
 
-        resumen = df.groupby(['Fecha_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
+        resumen = df_final.groupby(['Fecha_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
 
-        # Bulk Insert (Optimización Memoria 2)
-        fechas_afectadas = resumen['Fecha_Op'].unique().tolist()
-        
-        # Borrar SOLO lo que vamos a escribir (No toca los días futuros si se sube por partes)
-        if fechas_afectadas:
-            db.session.query(VentaVendedor).filter(
-                VentaVendedor.user_id == current_user.id,
-                VentaVendedor.fecha.in_(fechas_afectadas)
-            ).delete(synchronize_session=False)
-            db.session.commit()
-
+        # Bulk Insert
         bulk_data = []
         user_id_val = current_user.id
         
@@ -1136,26 +1155,30 @@ def subir_ventas_vendedor():
             })
 
         if bulk_data:
+            # NOTA: Ya no hace falta borrar porque filtramos arriba lo que ya existía.
+            # Solo insertamos lo nuevo.
             db.session.bulk_insert_mappings(VentaVendedor, bulk_data)
             db.session.commit()
 
-        count = len(bulk_data)
-        
-        if mensaje_corte:
-            flash(mensaje_corte, "warning") # Usamos warning para que resalte
+        # Flash inteligente
+        if "Quedan" in mensaje_aviso:
+            flash(mensaje_aviso, "warning")
         else:
-            flash(f"Proceso exitoso: {count} registros guardados.", "success")
+            flash(mensaje_aviso, "success")
             
-        # Redirigir a la última fecha CARGADA (sea la del corte o la final)
-        ultima_fecha = sorted(fechas_afectadas)[-1] if fechas_afectadas else datetime.now().strftime('%Y-%m-%d')
+        # Redirigir a la última fecha CARGADA AHORA
+        if not resumen.empty:
+            ultima_fecha = sorted(resumen['Fecha_Op'].unique())[-1]
+        else:
+            ultima_fecha = datetime.now().strftime('%Y-%m-%d')
+            
         return redirect(url_for('ver_ventas_vendedor', fecha=ultima_fecha))
 
     except Exception as e:
         db.session.rollback()
         traceback.print_exc()
         flash(f"Error crítico: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))
-# --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
+        return redirect(url_for('ver_ventas_vendedor'))# --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
