@@ -973,7 +973,11 @@ def ver_ventas_vendedor():
             else: res["Noche"].append(v)
     return render_template('ventas_vendedor.html', ventas_por_turno=res, fecha=fecha, t_litros=t_l, t_plata=t_p, limites=limites, user=current_user)
 # Asegúrate de tener estos imports
-from sqlalchemy import insert, distinct
+from sqlalchemy import insert
+from datetime import timedelta
+import pandas as pd
+import traceback
+
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
@@ -1012,7 +1016,7 @@ def subir_ventas_vendedor():
                 break
 
         if fila_tabla == -1:
-            flash("❌ No se detectó la tabla debajo de DETALLE. Revisá que el Excel tenga: Fecha, Vendedor, Producto e Importe.", "error")
+            flash("❌ No se detectó la tabla debajo de DETALLE.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
         # 3. ARMAR DATAFRAME FINAL
@@ -1031,8 +1035,8 @@ def subir_ventas_vendedor():
 
             if 'fecha' in cl:
                 map_cols[c] = 'Fecha'
-            elif 'hora' in cl and 'Fecha' not in map_cols.values():
-                map_cols[c] = 'Fecha'
+            elif 'hora' in cl:
+                map_cols[c] = 'Hora'
             elif 'vendedor' in cl:
                 map_cols[c] = 'Vendedor'
             elif 'producto' in cl or 'combustible' in cl:
@@ -1051,13 +1055,24 @@ def subir_ventas_vendedor():
         df = df.rename(columns=map_cols)
 
         # 5. FILTRAR COLUMNAS NECESARIAS
-        cols_to_keep = ['Fecha', 'Vendedor', 'Combustible', 'Litros', 'Importe', 'Precio', 'DuracionSeg', 'TipoPago']
+        cols_to_keep = ['Fecha', 'Hora', 'Vendedor', 'Combustible', 'Litros', 'Importe', 'Precio', 'DuracionSeg', 'TipoPago']
         df = df[[c for c in cols_to_keep if c in df.columns]]
+
+        if 'Importe' not in df.columns:
+            df['Importe'] = 0
 
         df = df.dropna(subset=['Vendedor'])
 
-        # 6. CONVERTIR FECHA
-        df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+        # 6. CONVERTIR FECHA + HORA (correctamente)
+        if 'Hora' in df.columns:
+            df['Fecha_DT'] = pd.to_datetime(
+                df['Fecha'].astype(str) + ' ' + df['Hora'].astype(str),
+                dayfirst=True,
+                errors='coerce'
+            )
+        else:
+            df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+
         df = df.dropna(subset=['Fecha_DT'])
 
         if df.empty:
@@ -1117,7 +1132,7 @@ def subir_ventas_vendedor():
         def buscar_turno_memoria(ts):
             for t in cache_turnos:
                 if t['inicio'] <= ts <= t['fin']:
-                    return t['fecha_op'], t['turno']
+                    return str(t['fecha_op']), t['turno']
             return ts.strftime('%Y-%m-%d'), 'Sin Turno'
 
         turnos = [buscar_turno_memoria(x) for x in df_final['Fecha_DT']]
@@ -1126,7 +1141,9 @@ def subir_ventas_vendedor():
         # 10. LIMPIEZA NUMÉRICA
         def safe_float(x):
             try:
-                return float(str(x).replace('.','').replace(',','.'))
+                if x is None or str(x).strip() == '':
+                    return 0.0
+                return float(str(x).replace('.', '').replace(',', '.'))
             except:
                 return 0.0
 
@@ -1163,7 +1180,7 @@ def subir_ventas_vendedor():
                 'litros': row['Litros'],
                 'monto': row['Importe'],
                 'precio': row.get('Precio', 0),
-                'primer_horario': row['Fecha_DT'].strftime('%H:%M:%S'),
+                'primer_horario': row['Fecha_DT'].strftime('%H:%M:%S') if pd.notna(row['Fecha_DT']) else '00:00:00',
                 'tipo_pago': str(row.get('TipoPago', '-')),
                 'duracion_seg': row.get('DuracionSeg', 0)
             })
@@ -1182,6 +1199,7 @@ def subir_ventas_vendedor():
         traceback.print_exc()
         flash(f"❌ Error crítico: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
+
     # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
