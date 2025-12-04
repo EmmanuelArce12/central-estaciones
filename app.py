@@ -1165,6 +1165,7 @@ def subir_ventas_vendedor():
 
     try:
         # 1. LECTURA ULTRA-RÁPIDA (Motor C)
+        # Usamos engine='c' que es mucho más rápido que el default
         if archivo.filename.lower().endswith('.csv'):
             try:
                 # 'header=None' porque buscaremos la cabecera real después
@@ -1351,7 +1352,7 @@ def subir_ventas_vendedor():
         # Imprimimos el error real en la consola de Render para debug
         print(traceback.format_exc())
         flash(f"❌ Error al procesar: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))   # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
+        return redirect(url_for('ver_ventas_vendedor'))  # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
