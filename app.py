@@ -945,34 +945,76 @@ def api_res(fecha):
 @login_required
 def ver_ventas_vendedor():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    
+    # 1. TRAEMOS LOS REPORTES DE CAJA (VOX)
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
+    
+    # Preparamos límites horarios y acumulador de VOX
     limites = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
+    totales_vox = { "Mañana": 0.0, "Tarde": 0.0, "Noche": 0.0 } # <--- Nuevo acumulador
+
     for r in reportes:
         if r.turno in limites:
+            # Acumulamos dinero del reporte VOX
+            totales_vox[r.turno] += (r.monto or 0.0) 
+            
+            # Lógica existente de horarios
             if r.hora_apertura:
                 t = r.hora_apertura.time()
                 if limites[r.turno]["inicio"] is None or t < limites[r.turno]["inicio"]: limites[r.turno]["inicio"] = t
             if r.hora_cierre:
                 t = r.hora_cierre.time()
                 if limites[r.turno]["fin"] is None or t > limites[r.turno]["fin"]: limites[r.turno]["fin"] = t
+
+    # 2. TRAEMOS VENTAS DETALLADAS (Vendedor)
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
     res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
+    
     t_l = 0; t_p = 0
+    
+    # 3. CLASIFICACIÓN (Tu lógica existente)
     for v in ventas:
         t_l += v.litros; t_p += v.monto; assigned = False
         try: h = datetime.strptime(v.primer_horario, "%H:%M:%S").time()
         except: res["Sin Asignar"].append(v); continue
+        
         for t, l in limites.items():
             if l["inicio"] and l["fin"]:
                 if (l["inicio"] < l["fin"] and l["inicio"] <= h <= l["fin"]) or (l["inicio"] > l["fin"] and (h >= l["inicio"] or h <= l["fin"])):
                     res[t].append(v); assigned = True; break
+        
         if not assigned:
             hr = h.hour
             if 6 <= hr < 14: res["Mañana"].append(v)
             elif 14 <= hr < 22: res["Tarde"].append(v)
             else: res["Noche"].append(v)
-    return render_template('ventas_vendedor.html', ventas_por_turno=res, fecha=fecha, t_litros=t_l, t_plata=t_p, limites=limites, user=current_user)
-# Asegúrate de tener estos imports
+
+    # 4. LÓGICA DE COMPARACIÓN (NUEVO)
+    # Calculamos cuánto suman los vendedores en cada turno
+    comparativa = {}
+    for turno in ["Mañana", "Tarde", "Noche"]:
+        suma_vendedores = sum(v.monto for v in res[turno])
+        suma_vox = totales_vox[turno]
+        
+        # Usamos una tolerancia de $10 pesos por cuestiones de redondeo decimal
+        diferencia = suma_vox - suma_vendedores
+        coincide = abs(diferencia) < 10.0 
+        
+        comparativa[turno] = {
+            "vox": suma_vox,
+            "vendedores": suma_vendedores,
+            "coincide": coincide,
+            "diferencia": diferencia
+        }
+
+    return render_template('ventas_vendedor.html', 
+                           ventas_por_turno=res, 
+                           fecha=fecha, 
+                           t_litros=t_l, 
+                           t_plata=t_p, 
+                           limites=limites, 
+                           user=current_user,
+                           comparativa=comparativa) # <--- Enviamos esto al HTML# Asegúrate de tener estos imports
 from sqlalchemy import insert
 from datetime import timedelta
 import pandas as pd
