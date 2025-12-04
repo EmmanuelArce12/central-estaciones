@@ -949,84 +949,91 @@ def ver_ventas_vendedor():
     # 1. TRAEMOS LOS REPORTES DE CAJA (VOX)
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
     
-    # Preparamos límites horarios (para clasificación) y acumulador de VOX (para auditoría)
-    limites_turno = { "Mañana": [], "Tarde": [], "Noche": [] } # Guardaremos rangos [inicio, fin] por turno
+    # --- Estructuras para Procesamiento y Auditoría ---
+    lista_reportes_dia = []
     totales_vox = { "Mañana": 0.0, "Tarde": 0.0, "Noche": 0.0 } 
     
-    # 2. PROCESAMIENTO DE LIMITES Y TOTALES VOX
+    # 2. PROCESAMIENTO DE REPORTES (VOX)
     for r in reportes:
-        if r.turno in totales_vox:
-            # Acumulamos dinero del reporte VOX
+        if r.turno in totales_vox and r.hora_apertura and r.hora_cierre:
+            
+            # Acumulamos el monto total para la auditoría (Totales por Turno)
             totales_vox[r.turno] += (r.monto or 0.0) 
             
-            # Guardamos los límites exactos de este reporte
-            if r.hora_apertura and r.hora_cierre:
-                # Almacenamos el objeto datetime completo para la comparación estricta
-                limites_turno[r.turno].append({
-                    'inicio_dt': r.hora_apertura,
-                    'fin_dt': r.hora_cierre,
-                    'inicio_time': r.hora_apertura.time(),
-                    'fin_time': r.hora_cierre.time(),
-                })
-
+            # Almacenamos el rango de tiempo exacto para la ASIGNACIÓN DETALLADA
+            lista_reportes_dia.append({
+                'turno': r.turno,
+                'inicio_dt': r.hora_apertura,
+                'fin_dt': r.hora_cierre,
+            })
+            
     # 3. TRAEMOS VENTAS DETALLADAS (Vendedor)
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
-    res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
     
+    res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
     t_l = 0; t_p = 0
     
-    # 4. LÓGICA DE CLASIFICACIÓN ESTRICTA (Basada en la hora exacta)
+    # 4. LÓGICA DE CLASIFICACIÓN ESTRICTA (Venta vs Rango VOX Individual)
     for v in ventas:
         t_l += v.litros; t_p += v.monto; assigned = False
         
         try: 
-            # Reconstruir el objeto datetime completo de la venta para comparar con los límites VOX
-            # Usamos la fecha del reporte Vendedor (v.fecha) + la hora (v.primer_horario)
             dt_venta_str = f"{v.fecha} {v.primer_horario}"
             dt_venta = datetime.strptime(dt_venta_str, '%Y-%m-%d %H:%M:%S')
         except: 
-            res["Sin Asignar"].append(v); continue # No se pudo parsear fecha/hora
+            res["Sin Asignar"].append(v); continue 
 
-        # Recorrer los límites de todos los turnos del día
-        for turno, rangos in limites_turno.items():
-            for rango in rangos:
-                # COMPARACIÓN ESTRICTA: Si la hora de la venta cae dentro del rango [apertura, cierre] del reporte VOX
-                if rango['inicio_dt'] <= dt_venta <= rango['fin_dt']:
-                    res[turno].append(v); 
-                    assigned = True; 
-                    break # Se encontró el turno, pasar a la siguiente venta
-            if assigned: break
+        # Iteramos sobre la lista PLANA de reportes (rangos) del día
+        for reporte_rango in lista_reportes_dia:
+            inicio = reporte_rango['inicio_dt']
+            fin = reporte_rango['fin_dt']
+            turno_asignado = reporte_rango['turno']
 
-        # Si no fue asignada a NINGÚN reporte VOX específico (posiblemente venta de otro día o fuera de rango)
+            if inicio <= dt_venta <= fin:
+                res[turno_asignado].append(v); 
+                assigned = True; 
+                break 
+        
+        # 5. FALLBACK
         if not assigned:
-            # Si no hay match estricto, usamos la asignación horaria general como ÚLTIMO RECURSO
             hr = dt_venta.hour
             if 6 <= hr < 14: res["Mañana"].append(v)
             elif 14 <= hr < 22: res["Tarde"].append(v)
             else: res["Noche"].append(v)
 
-    # 5. LÓGICA DE COMPARACIÓN Y AUDITORÍA (Existente)
+
+    # 6. LÓGICA DE COMPARACIÓN Y AUDITORÍA
     comparativa = {}
     limites_display = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
     
     for t in ["Mañana", "Tarde", "Noche"]:
-        # Calcular el rango de visualización
-        if limites_turno[t]:
-            # Encontrar el mínimo de inicio y el máximo de fin de todos los reportes de ese turno
-            min_inicio = min(r['inicio_time'] for r in limites_turno[t])
-            max_fin = max(r['fin_time'] for r in limites_turno[t])
+        
+        # 6.1. Calcular el rango MÍN/MÁX para visualizar
+        rangos_del_turno = [r for r in lista_reportes_dia if r['turno'] == t]
+        if rangos_del_turno:
+            min_inicio = min(r['inicio_dt'].time() for r in rangos_del_turno)
+            max_fin = max(r['fin_dt'].time() for r in rangos_del_turno)
             limites_display[t]["inicio"] = min_inicio
             limites_display[t]["fin"] = max_fin
+        
+        # 6.2. Calcular la suma de VENDEDORES EXCLUYENDO YER
+        
+        # Sumamos el total de YER
+        # Filtramos por 'yer' en minúsculas y aseguramos que tipo_pago no sea None
+        total_yer = sum(v.monto for v in res[t] if 'yer' in str(v.tipo_pago or '').lower())
+        
+        # Sumamos el total de CONTADO/TARJETA/VACÍO (lo que sí trae el VOX)
+        suma_vendedores_contado = sum(v.monto for v in res[t] if 'yer' not in str(v.tipo_pago or '').lower())
 
-        suma_vendedores = sum(v.monto for v in res[t])
         suma_vox = totales_vox[t]
         
-        diferencia = suma_vox - suma_vendedores
+        diferencia = suma_vox - suma_vendedores_contado
         coincide = abs(diferencia) < 10.0 
         
         comparativa[t] = {
             "vox": suma_vox,
-            "vendedores": suma_vendedores,
+            "vendedores_contado": suma_vendedores_contado, 
+            "total_yer": total_yer,        
             "coincide": coincide,
             "diferencia": diferencia
         }
@@ -1036,9 +1043,10 @@ def ver_ventas_vendedor():
                            fecha=fecha, 
                            t_litros=t_l, 
                            t_plata=t_p, 
-                           limites=limites_display, # Usamos los limites_display para mostrar
+                           limites=limites_display, 
                            user=current_user,
                            comparativa=comparativa)
+    
 from sqlalchemy import insert
 from datetime import timedelta
 import pandas as pd
@@ -1066,12 +1074,10 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. Localizar cabecera REAL debajo de "DETALLE"
+        # 2. Localizar cabecera REAL
         fila_tabla = -1
-
         for i, row in df_raw.head(120).iterrows():
             row_txt = " ".join(row.astype(str).str.lower())
-
             if (
                 "vendedor" in row_txt and
                 ("importe" in row_txt or "total" in row_txt) and
@@ -1094,28 +1100,21 @@ def subir_ventas_vendedor():
             .str.lower()
         )
 
-        # 4. MAPEO FLEXIBLE DE COLUMNAS
+        # 4. MAPEO FLEXIBLE DE COLUMNAS (MEJORADO PARA TIPO DE PAGO)
         map_cols = {}
         for c in df.columns:
             cl = c.lower()
 
-            if 'fecha' in cl:
-                map_cols[c] = 'Fecha'
-            elif 'hora' in cl:
-                map_cols[c] = 'Hora'
-            elif 'vendedor' in cl:
-                map_cols[c] = 'Vendedor'
-            elif 'producto' in cl or 'combustible' in cl:
-                map_cols[c] = 'Combustible'
-            elif 'vol' in cl or 'litro' in cl:
-                map_cols[c] = 'Litros'
-            elif 'importe' in cl or 'total' in cl:
-                map_cols[c] = 'Importe'
-            elif 'precio' in cl:
-                map_cols[c] = 'Precio'
-            elif 'duracion' in cl:
-                map_cols[c] = 'DuracionSeg'
-            elif 'tipo' in cl and 'pago' in cl:
+            if 'fecha' in cl: map_cols[c] = 'Fecha'
+            elif 'hora' in cl: map_cols[c] = 'Hora'
+            elif 'vendedor' in cl: map_cols[c] = 'Vendedor'
+            elif 'producto' in cl or 'combustible' in cl: map_cols[c] = 'Combustible'
+            elif 'vol' in cl or 'litro' in cl: map_cols[c] = 'Litros'
+            elif 'importe' in cl or 'total' in cl: map_cols[c] = 'Importe'
+            elif 'precio' in cl: map_cols[c] = 'Precio'
+            elif 'duracion' in cl: map_cols[c] = 'DuracionSeg'
+            # CORRECCIÓN: Buscamos tipo y (pago O venta)
+            elif 'tipo' in cl and ('pago' in cl or 'venta' in cl): 
                 map_cols[c] = 'TipoPago'
 
         df = df.rename(columns=map_cols)
@@ -1124,17 +1123,14 @@ def subir_ventas_vendedor():
         cols_to_keep = ['Fecha', 'Hora', 'Vendedor', 'Combustible', 'Litros', 'Importe', 'Precio', 'DuracionSeg', 'TipoPago']
         df = df[[c for c in cols_to_keep if c in df.columns]]
 
-        if 'Importe' not in df.columns:
-            df['Importe'] = 0
-
+        if 'Importe' not in df.columns: df['Importe'] = 0
         df = df.dropna(subset=['Vendedor'])
 
-        # 6. CONVERTIR FECHA + HORA (correctamente)
+        # 6. CONVERTIR FECHA + HORA
         if 'Hora' in df.columns:
             df['Fecha_DT'] = pd.to_datetime(
                 df['Fecha'].astype(str) + ' ' + df['Hora'].astype(str),
-                dayfirst=True,
-                errors='coerce'
+                dayfirst=True, errors='coerce'
             )
         else:
             df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
@@ -1147,9 +1143,8 @@ def subir_ventas_vendedor():
 
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
-        # 7. FILTRAR FECHAS YA CARGADAS
+        # 7. FILTRAR FECHAS YA CARGADAS (EXISTENTE)
         fechas_archivo = df['Fecha_Str'].unique().tolist()
-
         fechas_existentes = db.session.query(VentaVendedor.fecha).filter(
             VentaVendedor.user_id == current_user.id,
             VentaVendedor.fecha.in_(fechas_archivo)
@@ -1162,9 +1157,8 @@ def subir_ventas_vendedor():
             flash("⚠️ Todas las fechas ya estaban cargadas.", "warning")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 8. CORTE DE 15 DÍAS
+        # 8. CORTE DE 15 DÍAS (EXISTENTE)
         dias_unicos = sorted(df_nuevos['Fecha_DT'].dt.date.unique())
-
         if len(dias_unicos) > 15:
             dias_permitidos = dias_unicos[:15]
             df_final = df_nuevos[df_nuevos['Fecha_DT'].dt.date.isin(dias_permitidos)].copy()
@@ -1173,15 +1167,11 @@ def subir_ventas_vendedor():
             df_final = df_nuevos.copy()
             mensaje = f"✅ Se procesaron {len(dias_unicos)} días correctamente."
 
-        # 9. BUSCAR TURNOS
+        # 9. BUSCAR TURNOS Y ASIGNAR FECHA OPERATIVA
         min_f = df_final['Fecha_DT'].min() - timedelta(days=2)
         max_f = df_final['Fecha_DT'].max() + timedelta(days=2)
-
-        reportes = db.session.query(
-            Reporte.hora_apertura,
-            Reporte.hora_cierre,
-            Reporte.fecha_operativa,
-            Reporte.turno
+        reportes_aux = db.session.query(
+            Reporte.hora_apertura, Reporte.hora_cierre, Reporte.fecha_operativa
         ).filter(
             Reporte.user_id == current_user.id,
             Reporte.hora_apertura >= min_f,
@@ -1189,29 +1179,23 @@ def subir_ventas_vendedor():
         ).all()
 
         cache_turnos = [{
-            'inicio': r.hora_apertura,
-            'fin': r.hora_cierre,
-            'fecha_op': r.fecha_operativa,
-            'turno': r.turno
-        } for r in reportes if r.hora_apertura and r.hora_cierre]
+            'inicio': r.hora_apertura, 'fin': r.hora_cierre, 'fecha_op': r.fecha_operativa
+        } for r in reportes_aux if r.hora_apertura and r.hora_cierre]
 
-        def buscar_turno_memoria(ts):
+        def buscar_fecha_op_memoria(ts):
             for t in cache_turnos:
                 if t['inicio'] <= ts <= t['fin']:
-                    return str(t['fecha_op']), t['turno']
-            return ts.strftime('%Y-%m-%d'), 'Sin Turno'
+                    return str(t['fecha_op'])
+            return ts.strftime('%Y-%m-%d')
 
-        turnos = [buscar_turno_memoria(x) for x in df_final['Fecha_DT']]
-        df_final['Fecha_Op'] = [x[0] for x in turnos]
+        df_final['Fecha_Op'] = [buscar_fecha_op_memoria(x) for x in df_final['Fecha_DT']]
 
         # 10. LIMPIEZA NUMÉRICA
         def safe_float(x):
             try:
-                if x is None or str(x).strip() == '':
-                    return 0.0
+                if x is None or str(x).strip() == '': return 0.0
                 return float(str(x).replace('.', '').replace(',', '.'))
-            except:
-                return 0.0
+            except: return 0.0
 
         for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
             if col in df_final.columns:
@@ -1219,25 +1203,22 @@ def subir_ventas_vendedor():
 
         # 11. AGRUPAR
         agregaciones = {
-            'Litros': 'sum',
-            'Importe': 'sum',
-            'Fecha_DT': 'min'
+            'Litros': 'sum', 'Importe': 'sum', 'Fecha_DT': 'min'
         }
-
-        if 'Precio' in df_final.columns:
-            agregaciones['Precio'] = 'mean'
-
-        if 'DuracionSeg' in df_final.columns:
-            agregaciones['DuracionSeg'] = 'sum'
-
-        if 'TipoPago' in df_final.columns:
-            agregaciones['TipoPago'] = 'first'
+        if 'Precio' in df_final.columns: agregaciones['Precio'] = 'mean'
+        if 'DuracionSeg' in df_final.columns: agregaciones['DuracionSeg'] = 'sum'
+        if 'TipoPago' in df_final.columns: agregaciones['TipoPago'] = 'first'
 
         resumen = df_final.groupby(['Fecha_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
 
-        # 12. INSERTAR EN BASE
+        # 12. INSERTAR EN BASE (CON CORRECCIÓN DE TIPO_PAGO)
         bulk_data = []
         for _, row in resumen.iterrows():
+            
+            raw_tipo_pago = row.get('TipoPago', None)
+            # Si es NaN o None, queda como cadena vacía (''), lo que indica "Contado"
+            tipo_pago_final = str(raw_tipo_pago).strip() if pd.notna(raw_tipo_pago) else ''
+
             bulk_data.append({
                 'user_id': current_user.id,
                 'fecha': row['Fecha_Op'],
@@ -1247,7 +1228,7 @@ def subir_ventas_vendedor():
                 'monto': row['Importe'],
                 'precio': row.get('Precio', 0),
                 'primer_horario': row['Fecha_DT'].strftime('%H:%M:%S') if pd.notna(row['Fecha_DT']) else '00:00:00',
-                'tipo_pago': str(row.get('TipoPago', '-')),
+                'tipo_pago': tipo_pago_final, 
                 'duracion_seg': row.get('DuracionSeg', 0)
             })
 
@@ -1256,7 +1237,6 @@ def subir_ventas_vendedor():
             db.session.commit()
 
         flash(mensaje, "success")
-
         ultima_fecha = sorted(resumen['Fecha_Op'].unique())[-1]
         return redirect(url_for('ver_ventas_vendedor', fecha=ultima_fecha))
 
@@ -1265,7 +1245,6 @@ def subir_ventas_vendedor():
         traceback.print_exc()
         flash(f"❌ Error crítico: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
-
     # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required

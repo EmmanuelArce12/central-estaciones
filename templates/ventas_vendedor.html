@@ -62,7 +62,7 @@
             padding: 12px 25px; border-radius: 6px; cursor: pointer; 
             font-weight: bold; font-size: 14px; transition: 0.2s; white-space: nowrap;
             display: flex; align-items: center; justify-content: center; gap: 10px;
-            min-width: 160px; /* Para que no cambie mucho el ancho al cargar */
+            min-width: 160px;
         }
         button:hover { background-color: #218838; }
         
@@ -75,7 +75,7 @@
 
         /* Animación de la bolita */
         .spinner {
-            display: none; /* Oculto por defecto */
+            display: none;
             width: 14px;
             height: 14px;
             border: 2px solid rgba(255,255,255,0.3);
@@ -100,7 +100,7 @@
         .turno-title { font-size: 1.2rem; font-weight: bold; text-transform: uppercase; margin-right: auto; }
         .turno-horario { font-size: 0.9rem; opacity: 0.9; }
 
-        /* BADGE DE AUDITORÍA (Reporte vs Vendedores) */
+        /* BADGE DE AUDITORÍA */
         .audit-badge {
             background: rgba(255, 255, 255, 0.2);
             padding: 5px 12px;
@@ -217,18 +217,27 @@
                 <div class="turno-header">
                     <span class="turno-title">{{ turno }}</span>
 
-                    {% if comparativa is defined and comparativa[turno] and comparativa[turno].vox > 0 %}
-                        <div class="audit-badge {{ 'ok' if comparativa[turno].coincide else 'error' }}">
-                            <span>Reporte: $ {{ "{:,.2f}".format(comparativa[turno].vox) }}</span>
-                            
-                            {% if comparativa[turno].coincide %}
-                                <span title="Coincide con detalle vendedores">✅</span>
-                            {% else %}
-                                <span title="Diferencia: $ {{ '{:,.2f}'.format(comparativa[turno].diferencia) }}">
-                                    ⚠️ Dif: ${{ "{:,.2f}".format(comparativa[turno].diferencia) }}
-                                </span>
-                            {% endif %}
-                        </div>
+                    {% if comparativa is defined and comparativa[turno] and (comparativa[turno].vox > 0 or comparativa[turno].total_yer > 0) %}
+                        
+                        {% if comparativa[turno].total_yer > 0 %}
+                            <div class="audit-badge" style="background: rgba(175, 238, 238, 0.4); border: 1px solid deepskyblue; color: #1a252f;">
+                                <span>⛽ YER: $ {{ "{:,.2f}".format(comparativa[turno].total_yer) }}</span>
+                            </div>
+                        {% endif %}
+                        
+                        {% if comparativa[turno].vox > 0 %}
+                            <div class="audit-badge {{ 'ok' if comparativa[turno].coincide else 'error' }}">
+                                <span>Reporte (Contado): $ {{ "{:,.2f}".format(comparativa[turno].vox) }}</span>
+                                
+                                {% if comparativa[turno].coincide %}
+                                    <span title="Coincide con detalle vendedores (Excluyendo YER)">✅</span>
+                                {% else %}
+                                    <span title="Diferencia: $ {{ '{:,.2f}'.format(comparativa[turno].diferencia) }}">
+                                        ⚠️ Dif: ${{ "{:,.2f}".format(comparativa[turno].diferencia) }}
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
                     {% endif %}
                     {% if limites[turno] and limites[turno]['inicio'] %}
                         <span class="turno-horario">
@@ -259,6 +268,7 @@
                                         <tr>
                                             <th>Producto</th>
                                             <th>Horario</th>
+                                            <th>Tipo Pago</th>
                                             <th>Precio</th>
                                             <th>Litros</th>
                                             <th>Subtotal</th>
@@ -269,7 +279,7 @@
                                         <tr>
                                             <td>{{ v.combustible }}</td>
                                             <td>{{ v.primer_horario }}</td>
-                                            <td>$ {{ "{:,.2f}".format(v.precio) }}</td>
+                                            <td>{{ v.tipo_pago if v.tipo_pago else 'Contado/Tarjeta' }}</td> <td>$ {{ "{:,.2f}".format(v.precio) }}</td>
                                             <td>{{ "{:,.2f}".format(v.litros) }} L</td>
                                             <td>$ {{ "{:,.2f}".format(v.monto) }}</td>
                                         </tr>
@@ -323,21 +333,17 @@
             }
         }
 
-        // 3. LOGICA BOTÓN DE CARGA (NUEVO)
+        // 3. LOGICA BOTÓN DE CARGA
         const uploadForm = document.getElementById('uploadForm');
         const btnProcesar = document.getElementById('btnProcesar');
         const spinner = btnProcesar.querySelector('.spinner');
         const btnText = btnProcesar.querySelector('.btn-text');
 
         uploadForm.addEventListener('submit', function() {
-            // Verificar si hay archivo seleccionado antes de bloquear
             const fileInput = this.querySelector('input[type="file"]');
             if (fileInput.files.length > 0) {
-                // Deshabilitar botón
                 btnProcesar.disabled = true;
-                // Cambiar texto
                 btnText.textContent = "Cargando...";
-                // Mostrar bolita
                 spinner.style.display = "inline-block";
             }
         });
