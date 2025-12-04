@@ -1132,6 +1132,7 @@ def ver_ventas_vendedor():
     # -----------------------------------------
     # 6) ENVIAR A PANTALLA
     # -----------------------------------------
+  
     return render_template(
         "ventas_vendedor.html",
         ventas_por_turno=res,
@@ -1197,11 +1198,10 @@ def subir_ventas_vendedor():
             .str.lower()
         )
 
-        # 4. MAPEO FLEXIBLE DE COLUMNAS (MEJORADO PARA TIPO DE PAGO)
+        # 4. MAPEO FLEXIBLE DE COLUMNAS
         map_cols = {}
         for c in df.columns:
             cl = c.lower()
-
             if 'fecha' in cl: map_cols[c] = 'Fecha'
             elif 'hora' in cl: map_cols[c] = 'Hora'
             elif 'vendedor' in cl: map_cols[c] = 'Vendedor'
@@ -1210,7 +1210,6 @@ def subir_ventas_vendedor():
             elif 'importe' in cl or 'total' in cl: map_cols[c] = 'Importe'
             elif 'precio' in cl: map_cols[c] = 'Precio'
             elif 'duracion' in cl: map_cols[c] = 'DuracionSeg'
-            # CORRECCIÓN: Buscamos tipo y (pago O venta)
             elif 'tipo' in cl and ('pago' in cl or 'venta' in cl): 
                 map_cols[c] = 'TipoPago'
 
@@ -1240,7 +1239,7 @@ def subir_ventas_vendedor():
 
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
-        # 7. FILTRAR FECHAS YA CARGADAS (EXISTENTE)
+        # 7. FILTRAR FECHAS YA CARGADAS
         fechas_archivo = df['Fecha_Str'].unique().tolist()
         fechas_existentes = db.session.query(VentaVendedor.fecha).filter(
             VentaVendedor.user_id == current_user.id,
@@ -1254,7 +1253,7 @@ def subir_ventas_vendedor():
             flash("⚠️ Todas las fechas ya estaban cargadas.", "warning")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 8. CORTE DE 15 DÍAS (EXISTENTE)
+        # 8. CORTE DE 15 DÍAS
         dias_unicos = sorted(df_nuevos['Fecha_DT'].dt.date.unique())
         if len(dias_unicos) > 15:
             dias_permitidos = dias_unicos[:15]
@@ -1298,22 +1297,15 @@ def subir_ventas_vendedor():
             if col in df_final.columns:
                 df_final[col] = df_final[col].apply(safe_float)
 
-        # 11. AGRUPAR
-        agregaciones = {
-            'Litros': 'sum', 'Importe': 'sum', 'Fecha_DT': 'min'
-        }
-        if 'Precio' in df_final.columns: agregaciones['Precio'] = 'mean'
-        if 'DuracionSeg' in df_final.columns: agregaciones['DuracionSeg'] = 'sum'
-        if 'TipoPago' in df_final.columns: agregaciones['TipoPago'] = 'first'
+        # -------------------------------------------------------------
+        # 11. [CORREGIDO] NO AGRUPAR - INSERTAR TRANSACCIONES INDIVIDUALES
+        # (Se eliminó el paso groupby para preservar los horarios reales)
+        # -------------------------------------------------------------
 
-        resumen = df_final.groupby(['Fecha_Op', 'Vendedor', 'Combustible']).agg(agregaciones).reset_index()
-
-        # 12. INSERTAR EN BASE (CON CORRECCIÓN DE TIPO_PAGO)
         bulk_data = []
-        for _, row in resumen.iterrows():
+        for _, row in df_final.iterrows():
             
             raw_tipo_pago = row.get('TipoPago', None)
-            # Si es NaN o None, queda como cadena vacía (''), lo que indica "Contado"
             tipo_pago_final = str(raw_tipo_pago).strip() if pd.notna(raw_tipo_pago) else ''
 
             bulk_data.append({
@@ -1334,7 +1326,7 @@ def subir_ventas_vendedor():
             db.session.commit()
 
         flash(mensaje, "success")
-        ultima_fecha = sorted(resumen['Fecha_Op'].unique())[-1]
+        ultima_fecha = sorted(df_final['Fecha_Op'].unique())[-1]
         return redirect(url_for('ver_ventas_vendedor', fecha=ultima_fecha))
 
     except Exception as e:
@@ -1342,7 +1334,7 @@ def subir_ventas_vendedor():
         traceback.print_exc()
         flash(f"❌ Error crítico: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
-    # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
+     # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
