@@ -124,12 +124,36 @@
         .vendedor-header:hover { background-color: #f8f9fa; }
         .vendedor-header.active { background-color: #effcf1; border-left: 4px solid #28a745; }
 
-        .vh-info { display: flex; align-items: center; gap: 10px; }
-        .arrow-icon { transition: transform 0.3s ease; color: #aaa; font-size: 0.8rem; }
+        /* Contenedor de la izquierda: Nombre + Total Filtrado */
+        .vh-info { 
+            display: flex; 
+            flex-direction: column;
+            gap: 2px;
+            align-items: flex-start;
+        }
+        .arrow-icon { 
+            transition: transform 0.3s ease; 
+            color: #aaa; 
+            font-size: 0.8rem; 
+            margin-right: 5px; 
+        }
         .vendedor-header.active .arrow-icon { transform: rotate(90deg); color: #28a745; }
         
         .vh-name { font-size: 1.1rem; font-weight: 800; color: #2c3e50; text-transform: capitalize; }
-        .vh-total { font-size: 1.1rem; font-weight: 800; color: #28a745; }
+        
+        /* MONTO DE AUDITORÍA (Contado/Tarjeta) */
+        .vh-subtotal-contado { 
+            font-size: 0.9rem; 
+            font-weight: 600; 
+            color: #7f8c8d; 
+        }
+
+        /* Monto Total General (Incluye YER) a la derecha */
+        .vh-total { 
+            font-size: 1.1rem; 
+            font-weight: 800; 
+            color: #28a745; 
+        }
 
         .vendedor-content {
             max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background-color: #fafafa;
@@ -145,6 +169,42 @@
         }
         .detail-table tr:last-child td { border-bottom: none; }
         
+        /* --- ESTILOS DEL TOTAL DEL TURNO --- */
+        .turno-footer {
+            padding: 15px 25px;
+            border-top: 1px solid #eee;
+            background-color: #f8f9fa;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 20px;
+        }
+        .footer-total-box {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+        .footer-total-label {
+            font-size: 0.85rem;
+            color: #555;
+            font-weight: 600;
+        }
+        .footer-total-value {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #2c3e50;
+        }
+        .footer-diff-box {
+            padding: 8px 15px;
+            border-radius: 6px;
+            color: white;
+            font-weight: bold;
+            font-size: 1rem;
+        }
+        .footer-diff-ok { background-color: #28a745; }
+        .footer-diff-warning { background-color: #dc3545; }
+
+        /* Totales Globales */
         .totales-globales { 
             display: flex; gap: 20px; margin-top: 40px; padding-top: 20px; 
             border-top: 2px dashed #ccc; justify-content: flex-end; 
@@ -226,16 +286,8 @@
                         {% endif %}
                         
                         {% if comparativa[turno].vox > 0 %}
-                            <div class="audit-badge {{ 'ok' if comparativa[turno].coincide else 'error' }}">
+                            <div class="audit-badge">
                                 <span>Reporte (Contado): $ {{ "{:,.2f}".format(comparativa[turno].vox) }}</span>
-                                
-                                {% if comparativa[turno].coincide %}
-                                    <span title="Coincide con detalle vendedores (Excluyendo YER)">✅</span>
-                                {% else %}
-                                    <span title="Diferencia: $ {{ '{:,.2f}'.format(comparativa[turno].diferencia) }}">
-                                        ⚠️ Dif: ${{ "{:,.2f}".format(comparativa[turno].diferencia) }}
-                                    </span>
-                                {% endif %}
                             </div>
                         {% endif %}
                     {% endif %}
@@ -249,16 +301,26 @@
                 <div class="turno-body">
                     {% for vendedor, items in ventas_por_turno[turno] | sort(attribute='vendedor') | groupby('vendedor') %}
                         
-                        {% set total_vendedor = items | sum(attribute='monto') %}
+                        {% set total_vendedor_general = items | sum(attribute='monto') %}
+
+                        {% set total_vendedor_contado = 
+                             (items | selectattr('tipo_pago', '!=', 'YER') 
+                                    | selectattr('tipo_pago', '!=', 'yer') 
+                                    | sum(attribute='monto'))
+                        %}
+
                         
                         <div class="vendedor-group">
                             <div class="vendedor-header" onclick="toggleVendedor(this)">
                                 <div class="vh-info">
                                     <span class="arrow-icon">▶</span>
                                     <span class="vh-name">{{ vendedor }}</span>
+                                    <span class="vh-subtotal-contado">
+                                        $ {{ "{:,.2f}".format(total_vendedor_contado) }} (Contado)
+                                    </span>
                                 </div>
                                 <div class="vh-total">
-                                    $ {{ "{:,.2f}".format(total_vendedor) }}
+                                    $ {{ "{:,.2f}".format(total_vendedor_general) }}
                                 </div>
                             </div>
 
@@ -279,7 +341,8 @@
                                         <tr>
                                             <td>{{ v.combustible }}</td>
                                             <td>{{ v.primer_horario }}</td>
-                                            <td>{{ v.tipo_pago if v.tipo_pago else 'Contado/Tarjeta' }}</td> <td>$ {{ "{:,.2f}".format(v.precio) }}</td>
+                                            <td>{{ v.tipo_pago if v.tipo_pago else 'Contado/Tarjeta' }}</td>
+                                            <td>$ {{ "{:,.2f}".format(v.precio) }}</td>
                                             <td>{{ "{:,.2f}".format(v.litros) }} L</td>
                                             <td>$ {{ "{:,.2f}".format(v.monto) }}</td>
                                         </tr>
@@ -291,7 +354,27 @@
 
                     {% endfor %}
                 </div>
-            </div>
+                
+                {% if comparativa is defined and comparativa[turno] and comparativa[turno].vox > 0 %}
+                    {% set c = comparativa[turno] %}
+                    <div class="turno-footer">
+                        
+                        <div class="footer-total-box">
+                            <span class="footer-total-label">Total Vendedores (Contado/Tj)</span>
+                            <span class="footer-total-value">$ {{ "{:,.2f}".format(c.vendedores_contado) }}</span>
+                        </div>
+
+                        <div class="footer-diff-box {{ 'footer-diff-ok' if c.coincide else 'footer-diff-warning' }}">
+                            {% if c.coincide %}
+                                Cuadra ✅
+                            {% else %}
+                                Dif: ${{ "{:,.2f}".format(c.diferencia) }} ⚠️
+                            {% endif %}
+                        </div>
+
+                    </div>
+                {% endif %}
+                </div>
         {% endif %}
     {% endfor %}
 
