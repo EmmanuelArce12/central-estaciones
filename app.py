@@ -945,187 +945,165 @@ def api_res(fecha):
 @login_required
 def ver_ventas_vendedor():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
-    
-    # 1. TRAEMOS LOS REPORTES DE CAJA (VOX)
+
+    # 1) TRAEMOS REPORTES VOX
     reportes = Reporte.query.filter_by(user_id=current_user.id, fecha_operativa=fecha).all()
-    
-    # --- Estructuras para Procesamiento y Auditoría ---
+
     lista_reportes_dia = []
-    totales_vox = { "Mañana": 0.0, "Tarde": 0.0, "Noche": 0.0 } 
-    
-    # 2. PROCESAMIENTO DE REPORTES (VOX)
+    totales_vox = {"Mañana": 0.0, "Tarde": 0.0, "Noche": 0.0}
+
     for r in reportes:
         if r.turno in totales_vox and r.hora_apertura and r.hora_cierre:
-            
-            # Acumulamos el monto total para la auditoría (Totales por Turno)
-            totales_vox[r.turno] += (r.monto or 0.0) 
-            
-            # Almacenamos el rango de tiempo exacto para la ASIGNACIÓN DETALLADA
+            totales_vox[r.turno] += (r.monto or 0.0)
             lista_reportes_dia.append({
                 'turno': r.turno,
                 'inicio_dt': r.hora_apertura,
-                'fin_dt': r.hora_cierre,
+                'fin_dt': r.hora_cierre
             })
-            
-    # 3. TRAEMOS VENTAS DETALLADAS (Vendedor)
+
+    # 2) VENTAS
     ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha).all()
-    
-    res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
-    t_l = 0; t_p = 0
-    
-    # 4. LÓGICA DE CLASIFICACIÓN ESTRICTA (Venta vs Rango VOX Individual)
-# =====================================================
-# 4. NUEVA LÓGICA – CLASIFICACIÓN EXACTA POR RANGOS VOX
-# =====================================================
-
-    def construir_rangos_turnos(lista_reportes_dia):
-        try:
-            rangos = {}
-
-            # DEBUG – ver qué reportes llegan
-            print("====================================================")
-            print("REPORTES DEL DIA (RAW):")
-            for r in lista_reportes_dia:
-                print(" -", r['turno'], r['inicio_dt'], r['fin_dt'])
-            print("====================================================")
-
-            # Construcción de rangos agrupando VOX por turno
-            for r in lista_reportes_dia:
-                turno = r['turno']
-                ap  = r['inicio_dt']
-                ci  = r['fin_dt']
-
-                if turno not in rangos:
-                    rangos[turno] = {'ap': ap, 'ci': ci}
-                else:
-                    if ap < rangos[turno]['ap']:
-                        rangos[turno]['ap'] = ap
-                    if ci > rangos[turno]['ci']:
-                        rangos[turno]['ci'] = ci
-
-            # DEBUG – ver rangos unificados reales
-            print("RANGOS UNIFICADOS:")
-            for t, d in rangos.items():
-                print(f" - {t}: {d['ap']}  →  {d['ci']}")
-            print("====================================================")
-
-            return {t: (d['ap'], d['ci']) for t, d in rangos.items()}
-
-        except Exception as e:
-            print("❌ Error en construir_rangos_turnos:", e)
-            return {}
-
-
-    def asignar_vox(dt_venta, rangos_ordenados):
-        try:
-            for idx, (turno, ap, ci) in enumerate(rangos_ordenados):
-
-                if ap <= dt_venta <= ci:
-                    return turno
-
-                if dt_venta > ci:
-                    if idx + 1 < len(rangos_ordenados):
-                        return rangos_ordenados[idx + 1][0]
-                    else:
-                        return rangos_ordenados[0][0]
-
-                if dt_venta < ap:
-                    if idx - 1 >= 0:
-                        return rangos_ordenados[idx - 1][0]
-                    else:
-                        return rangos_ordenados[-1][0]
-
-            return "Sin Asignar"
-
-        except Exception as e:
-            print("❌ Error en asignar_vox:", e)
-            return "Sin Asignar"
-
-
-    # Construcción de rangos VOX reales
-    rangos = construir_rangos_turnos(lista_reportes_dia)
-
-    # Si por algún motivo no hay rangos → no romper
-    try:
-        rangos_ordenados = sorted(
-            [(t, ap, ci) for t, (ap, ci) in rangos.items()],
-            key=lambda x: x[1]
-        )
-    except:
-        rangos_ordenados = []
-
-    # Limpiar estructura resultante
+    t_l = 0
+    t_p = 0
     res = {"Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": []}
 
-    # Procesar cada venta
-    for v in ventas:
+    # ============================================================
+    # 3) ARMAMOS RANGOS VOX EXACTOS
+    # ============================================================
 
+    def unificar_reportes_vox(reps):
+        print("====================================================")
+        print("REPORTES DEL DIA (RAW):")
+        for r in reps:
+            print(" -", r['turno'], r['inicio_dt'], r['fin_dt'])
+        print("====================================================")
+
+        rangos = {}
+
+        # MAÑANA Y TARDE SE TOMAN TAL CUAL VINIERON
+        for t in ["Mañana", "Tarde"]:
+            subset = [r for r in reps if r["turno"] == t]
+            if subset:
+                ap = min(r["inicio_dt"] for r in subset)
+                ci = max(r["fin_dt"] for r in subset)
+                rangos[t] = (ap, ci)
+
+        # NOCHE = cierre TARDE → apertura MAÑANA siguiente
+        tarde = [r for r in reps if r["turno"] == "Tarde"]
+        manana = [r for r in reps if r["turno"] == "Mañana"]
+
+        if tarde and manana:
+            cierre_tarde = max(r["fin_dt"] for r in tarde)
+            apertura_manana = min(r["inicio_dt"] for r in manana)
+
+            # si la apertura de mañana es mismo día, la pasamos al día siguiente
+            if apertura_manana.date() == cierre_tarde.date():
+                apertura_manana = apertura_manana + timedelta(days=1)
+
+            rangos["Noche"] = (cierre_tarde, apertura_manana)
+
+        print("RANGOS UNIFICADOS:")
+        for t, (ap, ci) in rangos.items():
+            print(f" - {t}: {ap} → {ci}")
+        print("====================================================")
+
+        return rangos
+
+    rangos = unificar_reportes_vox(lista_reportes_dia)
+
+    # ============================================================
+    # 4) ASIGNACIÓN EXACTA: DENTRO → ESE TURNO / DESPUÉS → SIGUIENTE
+    # ============================================================
+
+    def asignar_turno(dt_venta, rangos):
+
+        # 1) Si está dentro de un turno → pertenece a ese turno
+        for turno, (ap, ci) in rangos.items():
+            if ap <= dt_venta <= ci:
+                return turno
+
+        # 2) Ordenamos por apertura
+        ordenados = sorted(rangos.items(), key=lambda x: x[1][0])
+
+        for idx, (turno, (ap, ci)) in enumerate(ordenados):
+
+            # Si fue DESPUÉS del cierre → siguiente turno
+            if dt_venta > ci:
+                if idx + 1 < len(ordenados):
+                    return ordenados[idx + 1][0]
+                else:
+                    return ordenados[0][0]  # después del cierre de noche → mañana
+
+            # Si es ANTES de la apertura → turno anterior
+            if dt_venta < ap:
+                if idx - 1 >= 0:
+                    return ordenados[idx - 1][0]
+                else:
+                    return ordenados[-1][0]  # antes de mañana → noche
+
+        return "Sin Asignar"
+
+    # ============================================================
+    # 5) PROCESAMOS TODAS LAS VENTAS
+    # ============================================================
+
+    for v in ventas:
         t_l += v.litros
         t_p += v.monto
 
         try:
-            dt_venta_str = f"{v.fecha} {v.primer_horario}"
-            dt_venta = datetime.strptime(dt_venta_str, '%Y-%m-%d %H:%M:%S')
+            dt_venta = datetime.strptime(f"{v.fecha} {v.primer_horario}", "%Y-%m-%d %H:%M:%S")
         except:
             res["Sin Asignar"].append(v)
             continue
 
-        try:
-            turno_destino = asignar_vox(dt_venta, rangos_ordenados)
-            if turno_destino not in res:
-                turno_destino = "Sin Asignar"
-        except Exception as e:
-            print("❌ Error asignando turno:", e)
-            turno_destino = "Sin Asignar"
+        turno = asignar_turno(dt_venta, rangos)
+        if turno not in res:
+            turno = "Sin Asignar"
 
-        res[turno_destino].append(v)
+        res[turno].append(v)
 
+    # ============================================================
+    # 6) AUDITORÍA
+    # ============================================================
 
-
-    # 6. LÓGICA DE COMPARACIÓN Y AUDITORÍA
     comparativa = {}
-    limites_display = { "Mañana": {"inicio": None, "fin": None}, "Tarde": {"inicio": None, "fin": None}, "Noche": {"inicio": None, "fin": None} }
-    
-    for t in ["Mañana", "Tarde", "Noche"]:
-        
-        # 6.1. Calcular el rango MÍN/MÁX para visualizar
-        rangos_del_turno = [r for r in lista_reportes_dia if r['turno'] == t]
-        if rangos_del_turno:
-            min_inicio = min(r['inicio_dt'].time() for r in rangos_del_turno)
-            max_fin = max(r['fin_dt'].time() for r in rangos_del_turno)
-            limites_display[t]["inicio"] = min_inicio
-            limites_display[t]["fin"] = max_fin
-        
-        # 6.2. Calcular la suma de VENDEDORES EXCLUYENDO YER
-        
-        # Sumamos el total de YER
-        # Filtramos por 'yer' en minúsculas y aseguramos que tipo_pago no sea None
-        total_yer = sum(v.monto for v in res[t] if 'yer' in str(v.tipo_pago or '').lower())
-        
-        # Sumamos el total de CONTADO/TARJETA/VACÍO (lo que sí trae el VOX)
-        suma_vendedores_contado = sum(v.monto for v in res[t] if 'yer' not in str(v.tipo_pago or '').lower())
+    limites_display = {"Mañana": {"inicio": None, "fin": None},
+                       "Tarde": {"inicio": None, "fin": None},
+                       "Noche": {"inicio": None, "fin": None}}
 
-        suma_vox = totales_vox[t]
-        
-        diferencia = suma_vox - suma_vendedores_contado
-        coincide = abs(diferencia) < 10.0 
-        
+    for t in ["Mañana", "Tarde", "Noche"]:
+
+        subset = [r for r in lista_reportes_dia if r["turno"] == t]
+        if subset:
+            limites_display[t]["inicio"] = min(r['inicio_dt'].time() for r in subset)
+            limites_display[t]["fin"] = max(r['fin_dt'].time() for r in subset)
+
+        total_yer = sum(v.monto for v in res[t] if "yer" in str(v.tipo_pago or "").lower())
+        total_contado = sum(v.monto for v in res[t] if "yer" not in str(v.tipo_pago or "").lower())
+        vox = totales_vox[t]
+        diferencia = vox - total_contado
+
         comparativa[t] = {
-            "vox": suma_vox,
-            "vendedores_contado": suma_vendedores_contado, 
-            "total_yer": total_yer,        
-            "coincide": coincide,
+            "vox": vox,
+            "vendedores_contado": total_contado,
+            "total_yer": total_yer,
+            "coincide": abs(diferencia) < 10,
             "diferencia": diferencia
         }
 
-    return render_template('ventas_vendedor.html', 
-                           ventas_por_turno=res, 
-                           fecha=fecha, 
-                           t_litros=t_l, 
-                           t_plata=t_p, 
-                           limites=limites_display, 
-                           user=current_user,
-                           comparativa=comparativa)
+    # ============================================================
+    return render_template(
+        "ventas_vendedor.html",
+        ventas_por_turno=res,
+        fecha=fecha,
+        t_litros=t_l,
+        t_plata=t_p,
+        limites=limites_display,
+        user=current_user,
+        comparativa=comparativa
+    )
+
     
 from sqlalchemy import insert
 from datetime import timedelta
