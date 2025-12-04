@@ -982,6 +982,14 @@ def ver_ventas_vendedor():
         try:
             rangos = {}
 
+            # DEBUG – ver qué reportes llegan
+            print("====================================================")
+            print("REPORTES DEL DIA (RAW):")
+            for r in lista_reportes_dia:
+                print(" -", r['turno'], r['inicio_dt'], r['fin_dt'])
+            print("====================================================")
+
+            # Construcción de rangos agrupando VOX por turno
             for r in lista_reportes_dia:
                 turno = r['turno']
                 ap  = r['inicio_dt']
@@ -990,13 +998,23 @@ def ver_ventas_vendedor():
                 if turno not in rangos:
                     rangos[turno] = {'ap': ap, 'ci': ci}
                 else:
-                    if ap < rangos[turno]['ap']: rangos[turno]['ap'] = ap
-                    if ci > rangos[turno]['ci']: rangos[turno]['ci'] = ci
+                    if ap < rangos[turno]['ap']:
+                        rangos[turno]['ap'] = ap
+                    if ci > rangos[turno]['ci']:
+                        rangos[turno]['ci'] = ci
+
+            # DEBUG – ver rangos unificados reales
+            print("RANGOS UNIFICADOS:")
+            for t, d in rangos.items():
+                print(f" - {t}: {d['ap']}  →  {d['ci']}")
+            print("====================================================")
 
             return {t: (d['ap'], d['ci']) for t, d in rangos.items()}
+
         except Exception as e:
             print("❌ Error en construir_rangos_turnos:", e)
             return {}
+
 
     def asignar_vox(dt_venta, rangos_ordenados):
         try:
