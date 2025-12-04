@@ -18,11 +18,28 @@
         }
         .btn-back:hover { background: #e9ecef; }
         
-        /* ALERTAS */
+        /* ALERTAS GENERALES */
         .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; border: 1px solid transparent; }
         .alert-success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
         .alert-warning { background-color: #fff3cd; color: #856404; border-color: #ffeeba; }
         .alert-error { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+
+        /* AVISO DE LÍMITE (NUEVO) */
+        .alert-limit {
+            background-color: #fff8e1;
+            border-left: 5px solid #ffc107;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+        }
+        .limit-icon { font-size: 1.5rem; }
+        .limit-content h4 { margin: 0 0 5px 0; color: #d35400; font-size: 1rem; font-weight: bold; }
+        .limit-content p { margin: 0; font-size: 0.9rem; color: #555; line-height: 1.4; }
+        .limit-content strong { color: #333; }
 
         /* BARRA DE CONTROL */
         .control-bar {
@@ -138,6 +155,20 @@
       {% endif %}
     {% endwith %}
 
+    <div class="alert-limit">
+        <div class="limit-icon">⚠️</div>
+        <div class="limit-content">
+            <h4>Atención: Carga de Archivos Grandes</h4>
+            <p>
+                Para garantizar la estabilidad del sistema, solo se procesarán automáticamente 
+                <strong>los primeros 15 días</strong> del archivo.<br>
+                Si deseas cargar un mes completo, sube el archivo original (procesará días 1-15) 
+                y luego sube otro archivo con el resto (días 16-30). 
+                <strong>No se borrarán los datos previos.</strong>
+            </p>
+        </div>
+    </div>
+
     <div class="control-bar">
         <div class="search-card">
             <label>📅 Consultar fecha:</label>
@@ -147,7 +178,7 @@
         <form action="/estacion/subir-ventas-vendedor" method="POST" enctype="multipart/form-data" class="upload-card">
             <div class="form-group">
                 <label>📂 Cargar Nuevo Reporte (Excel):</label>
-                <input type="file" name="archivo" accept=".xlsx, .xls" required>
+                <input type="file" name="archivo" accept=".xlsx, .xls, .csv" required>
             </div>
             <button type="submit">⬆️ Procesar Archivo</button>
         </form>
