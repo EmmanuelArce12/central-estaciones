@@ -996,22 +996,23 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. BUSCAR ENCABEZADO REAL DE LA TABLA (POST DETALLE)
+        # 2. Localizar cabecera REAL debajo de "DETALLE"
         fila_tabla = -1
 
-        for i, row in df_raw.head(80).iterrows():
-            row_text = " ".join(row.astype(str).str.lower())
+        for i, row in df_raw.head(120).iterrows():
+            row_txt = " ".join(row.astype(str).str.lower())
 
             if (
-                ('vendedor' in row_text)
-                and ('fecha' in row_text or 'hora' in row_text)
-                and ('producto' in row_text or 'combustible' in row_text)
+                "vendedor" in row_txt and
+                ("importe" in row_txt or "total" in row_txt) and
+                ("fecha" in row_txt or "hora" in row_txt) and
+                ("producto" in row_txt or "combustible" in row_txt)
             ):
                 fila_tabla = i
                 break
 
         if fila_tabla == -1:
-            flash("❌ No se detectó la tabla de ventas debajo del bloque DETALLE.", "error")
+            flash("❌ No se detectó la tabla debajo de DETALLE. Revisá que el Excel tenga: Fecha, Vendedor, Producto e Importe.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
         # 3. ARMAR DATAFRAME FINAL
