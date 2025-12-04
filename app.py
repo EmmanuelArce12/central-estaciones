@@ -1150,209 +1150,153 @@ from datetime import timedelta
 import pandas as pd
 import traceback
 
-@app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
+@app.route("/subir_ventas_vendedor", methods=["POST"])
 @login_required
 def subir_ventas_vendedor():
-    # Importamos numpy aquí por si no está declarado arriba
-    import numpy as np
 
-    if 'archivo' not in request.files:
-        return redirect(url_for('ver_ventas_vendedor'))
+    if "archivo" not in request.files:
+        flash("No se seleccionó archivo.", "error")
+        return redirect(url_for("ver_ventas_vendedor"))
 
-    archivo = request.files['archivo']
-    if archivo.filename == '':
-        return redirect(url_for('ver_ventas_vendedor'))
+    archivo = request.files["archivo"]
 
-    try:
-        # 1. LECTURA ULTRA-RÁPIDA (Motor C)
-        # Usamos engine='c' que es mucho más rápido que el default
-        if archivo.filename.lower().endswith('.csv'):
-            try:
-                # 'header=None' porque buscaremos la cabecera real después
-                df_raw = pd.read_csv(archivo, header=None, engine='c') 
-            except:
-                archivo.seek(0)
-                df_raw = pd.read_csv(archivo, sep=';', header=None, engine='python')
+    if archivo.filename == "":
+        flash("Archivo no válido.", "error")
+        return redirect(url_for("ver_ventas_vendedor"))
+
+    # ============================================================
+    # 1) LEER ARCHIVO COMPLETO SIN AFECTAR RAM
+    # ============================================================
+    if archivo.filename.lower().endswith(".csv"):
+        try:
+            df_raw = pd.read_csv(archivo, header=None, engine="c")
+        except:
+            archivo.seek(0)
+            df_raw = pd.read_csv(archivo, sep=";", header=None, engine="python")
+    else:
+        df_raw = pd.read_excel(archivo, header=None)
+
+    # ============================================================
+    # 2) DETECTAR AUTOMÁTICAMENTE LA FILA DE CABECERA
+    # ============================================================
+    fila_tabla = -1
+
+    for i, row in df_raw.iterrows():
+        valores = [str(c).strip().lower() for c in row]
+
+        tiene_vendedor = any("vendedor" in v for v in valores)
+        tiene_importe = any(
+            ("importe" in v) or ("monto" in v) or ("total" in v)
+            for v in valores
+        )
+
+        if tiene_vendedor and tiene_importe:
+            fila_tabla = i
+            break
+
+    if fila_tabla == -1:
+        flash("❌ No se encontró la cabecera de ventas (falta 'Vendedor' o 'Importe').", "error")
+        return redirect(url_for("ver_ventas_vendedor"))
+
+    # ============================================================
+    # 3) CREAR DF DEFINITIVO USANDO ESA CABECERA
+    # ============================================================
+    df = df_raw.iloc[fila_tabla + 1:].copy()
+
+    df.columns = (
+        df_raw.iloc[fila_tabla]
+        .astype(str).str.strip().str.lower().str.replace(" ", "_")
+    )
+
+    # ============================================================
+    # 4) MAPEO DE COLUMNAS A NOMBRES ESTÁNDAR
+    # ============================================================
+    map_cols = {}
+    for c in df.columns:
+        if "fecha" in c: map_cols[c] = "Fecha"
+        elif "hora" in c: map_cols[c] = "Hora"
+        elif "vendedor" in c: map_cols[c] = "Vendedor"
+        elif "producto" in c or "comb" in c: map_cols[c] = "Combustible"
+        elif "vol" in c or "litro" in c: map_cols[c] = "Litros"
+        elif "importe" in c or "monto" in c or "total" in c: map_cols[c] = "Importe"
+        elif "precio" in c: map_cols[c] = "Precio"
+        elif "dur" in c: map_cols[c] = "DuracionSeg"
+        elif "tipo" in c and "pago" in c: map_cols[c] = "TipoPago"
+
+    df = df.rename(columns=map_cols)
+
+    if "Vendedor" not in df.columns or "Importe" not in df.columns:
+        flash("❌ Archivo inválido: faltan columnas obligatorias.", "error")
+        return redirect(url_for("ver_ventas_vendedor"))
+
+    # ============================================================
+    # 5) ARMAR FECHA + HORA REAL (Fecha_DT) y primer_horario
+    # ============================================================
+    if "Hora" in df.columns:
+        s_fecha = df["Fecha"].astype(str)
+        s_hora = df["Hora"].astype(str)
+
+        df["Fecha_DT"] = pd.to_datetime(
+            s_fecha + " " + s_hora,
+            dayfirst=True,
+            errors="coerce"
+        )
+    else:
+        df["Fecha_DT"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")
+
+    df = df.dropna(subset=["Fecha_DT"])
+    df["Fecha_Str"] = df["Fecha_DT"].dt.strftime("%Y-%m-%d")
+    df["primer_horario"] = df["Fecha_DT"].dt.strftime("%H:%M:%S")
+
+    # ============================================================
+    # 6) LIMPIEZA NUMÉRICA
+    # ============================================================
+    for col in ["Litros", "Importe", "Precio", "DuracionSeg"]:
+        if col not in df.columns:
+            df[col] = 0
         else:
-            df_raw = pd.read_excel(archivo, header=None)
+            df[col] = (
+                df[col].astype(str)
+                .str.replace("$", "")
+                .str.replace(",", "")
+                .str.replace(".", "", regex=False)
+                .str.strip()
+            )
 
-        # 2. LOCALIZAR CABECERA REAL
-        fila_tabla = -1
-        # Buscamos solo en las primeras 50 filas para no perder tiempo
-        for i, row in df_raw.head(50).iterrows():
-            row_txt = " ".join(row.astype(str).str.lower())
-            if "vendedor" in row_txt and ("importe" in row_txt or "total" in row_txt):
-                fila_tabla = i
-                break
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-        if fila_tabla == -1:
-            flash("❌ No se detectó la tabla de ventas (falta 'Vendedor' o 'Importe').", "error")
-            return redirect(url_for('ver_ventas_vendedor'))
+    if "TipoPago" not in df.columns:
+        df["TipoPago"] = ""
 
-        # 3. NORMALIZAR DATAFRAME
-        df = df_raw.iloc[fila_tabla + 1:].copy()
-        df.columns = df_raw.iloc[fila_tabla].astype(str).str.strip().str.lower()
+    # ============================================================
+    # 7) ARMAR CAMPOS PARA LA TABLA ventas_vendedor
+    # ============================================================
+    df["user_id"] = current_user.id
+    df["fecha"] = df["Fecha_Str"]
+    df["vendedor"] = df["Vendedor"]
+    df["combustible"] = df.get("Combustible", "")
+    df["litros"] = df["Litros"]
+    df["monto"] = df["Importe"]
+    df["precio"] = df["Precio"]
+    df["tipo_pago"] = df["TipoPago"]
+    df["duracion_seg"] = df["DuracionSeg"]
 
-        # 4. MAPEO INTELIGENTE DE COLUMNAS
-        map_cols = {}
-        for c in df.columns:
-            if 'fecha' in c: map_cols[c] = 'Fecha'
-            elif 'hora' in c: map_cols[c] = 'Hora'
-            elif 'vendedor' in c: map_cols[c] = 'Vendedor'
-            elif 'producto' in c or 'combustible' in c: map_cols[c] = 'Combustible'
-            elif 'vol' in c or 'litro' in c: map_cols[c] = 'Litros'
-            elif 'importe' in c or 'total' in c: map_cols[c] = 'Importe'
-            elif 'precio' in c: map_cols[c] = 'Precio'
-            elif 'duracion' in c: map_cols[c] = 'DuracionSeg'
-            elif 'tipo' in c and ('pago' in c or 'venta' in c): map_cols[c] = 'TipoPago'
+    campos_sql = [
+        "user_id", "fecha", "vendedor", "combustible",
+        "litros", "monto", "precio",
+        "primer_horario", "tipo_pago", "duracion_seg"
+    ]
 
-        df = df.rename(columns=map_cols)
-        
-        # Validaciones mínimas
-        if 'Vendedor' not in df.columns or 'Importe' not in df.columns:
-            flash("❌ El archivo no tiene las columnas requeridas.", "error")
-            return redirect(url_for('ver_ventas_vendedor'))
+    data_to_insert = df[campos_sql].to_dict("records")
 
-        df = df.dropna(subset=['Vendedor'])
-        
-        # 5. CONSTRUCCIÓN DE FECHA + HORA (Vectorizado)
-        # Esto genera la hora EXACTA del despacho para la comparación posterior
-        if 'Hora' in df.columns:
-            s_fecha = df['Fecha'].astype(str)
-            s_hora = df['Hora'].astype(str)
-            df['Fecha_DT'] = pd.to_datetime(s_fecha + ' ' + s_hora, dayfirst=True, errors='coerce')
-        else:
-            df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-            
-        df = df.dropna(subset=['Fecha_DT'])
-        
-        # Guardamos la fecha texto para filtrar duplicados
-        df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
+    # ============================================================
+    # 8) INSERTAR TODO EN LA BASE
+    # ============================================================
+    db.session.bulk_insert_mappings(VentaVendedor, data_to_insert)
+    db.session.commit()
 
-        # 6. FILTRO DE YA CARGADOS (Sin bucles)
-        fechas_archivo = df['Fecha_Str'].unique().tolist()
-        if not fechas_archivo:
-             flash("❌ No se encontraron fechas válidas.", "error")
-             return redirect(url_for('ver_ventas_vendedor'))
-
-        # Consultamos la tabla 'ventas_vendedor' a través del modelo VentaVendedor
-        fechas_existentes = db.session.query(VentaVendedor.fecha).filter(
-            VentaVendedor.user_id == current_user.id,
-            VentaVendedor.fecha.in_(fechas_archivo)
-        ).distinct().all()
-        
-        set_existentes = set([f[0] for f in fechas_existentes])
-        df_final = df[~df['Fecha_Str'].isin(set_existentes)].copy()
-
-        if df_final.empty:
-            flash("⚠️ Esas fechas ya estaban cargadas.", "warning")
-            return redirect(url_for('ver_ventas_vendedor'))
-
-        # 7. ASIGNACIÓN DE TURNO/FECHA OPERATIVA (Algoritmo Ultrarrápido 'merge_asof')
-        
-        # A) Primero: Regla general (Si es < 06:00 AM, es día operativo anterior)
-        # Usamos numpy para hacerlo instantáneo en las miles de filas
-        horas = df_final['Fecha_DT'].dt.hour
-        dias_restar = np.where(horas < 6, 1, 0) # Si hora < 6, resta 1 día, sino 0
-        fechas_ajustadas = df_final['Fecha_DT'] - pd.to_timedelta(dias_restar, unit='D')
-        
-        df_final['Fecha_Op_Final'] = fechas_ajustadas.dt.strftime('%Y-%m-%d')
-
-        # B) Segundo: Ajuste Fino con VOX (Si existe reporte)
-        min_f = df_final['Fecha_DT'].min() - timedelta(days=2)
-        max_f = df_final['Fecha_DT'].max() + timedelta(days=2)
-        
-        reportes = db.session.query(
-            Reporte.hora_apertura, Reporte.hora_cierre, Reporte.fecha_operativa
-        ).filter(
-            Reporte.user_id == current_user.id,
-            Reporte.hora_apertura >= min_f,
-            Reporte.hora_cierre <= max_f
-        ).all()
-
-        if reportes:
-            # Convertimos reportes a DataFrame para cruzar
-            df_reps = pd.DataFrame([
-                {'r_apertura': r.hora_apertura, 'r_cierre': r.hora_cierre, 'r_fecha_op': r.fecha_operativa}
-                for r in reportes if r.hora_apertura and r.hora_cierre
-            ])
-            
-            if not df_reps.empty:
-                # merge_asof requiere ordenar por tiempo
-                df_reps = df_reps.sort_values('r_apertura')
-                df_final = df_final.sort_values('Fecha_DT')
-                
-                # CRUCE MÁGICO: Busca el turno que 'abrió' antes de la venta
-                df_merged = pd.merge_asof(
-                    df_final, 
-                    df_reps, 
-                    left_on='Fecha_DT', 
-                    right_on='r_apertura', 
-                    direction='backward'
-                )
-                
-                # Validamos: La venta debe ser <= al cierre de ese turno encontrado
-                mask_valido = (
-                    pd.notna(df_merged['r_fecha_op']) & 
-                    (df_merged['Fecha_DT'] <= df_merged['r_cierre'])
-                )
-                
-                # Solo donde coincide perfecto, usamos la fecha operativa de la VOX
-                df_merged.loc[mask_valido, 'Fecha_Op_Final'] = df_merged.loc[mask_valido, 'r_fecha_op']
-                df_final = df_merged
-
-        # 8. PREPARACIÓN FINAL (Limpieza Numérica Vectorizada)
-        for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
-            if col in df_final.columns:
-                # Quitar $ y , de un solo golpe en toda la columna
-                df_final[col] = pd.to_numeric(
-                    df_final[col].astype(str).str.replace(r'[$,]', '', regex=True), 
-                    errors='coerce'
-                ).fillna(0)
-            else:
-                df_final[col] = 0
-        
-        if 'TipoPago' not in df_final.columns:
-            df_final['TipoPago'] = ''
-        else:
-            df_final['TipoPago'] = df_final['TipoPago'].fillna('').astype(str).str.strip()
-
-        # 9. INSERTAR EN LA TABLA 'ventas_vendedor'
-        # Asignamos las columnas exactas que pide el modelo
-        df_final['user_id'] = current_user.id
-        df_final['fecha'] = df_final['Fecha_Op_Final']
-        df_final['vendedor'] = df_final['Vendedor']
-        df_final['combustible'] = df_final['Combustible']
-        df_final['litros'] = df_final['Litros']
-        df_final['monto'] = df_final['Importe']
-        df_final['precio'] = df_final['Precio']
-        # AQUÍ ESTÁ LA CLAVE: Guardamos la hora exacta, no agrupada
-        df_final['primer_horario'] = df_final['Fecha_DT'].dt.strftime('%H:%M:%S')
-        df_final['tipo_pago'] = df_final['TipoPago']
-        df_final['duracion_seg'] = df_final['DuracionSeg']
-
-        cols_db = ['user_id', 'fecha', 'vendedor', 'combustible', 'litros', 'monto', 
-                   'precio', 'primer_horario', 'tipo_pago', 'duracion_seg']
-        
-        # Convertimos a lista de diccionarios para SQLAlchemy
-        data_to_insert = df_final[cols_db].to_dict('records')
-
-        if data_to_insert:
-            # Usamos el modelo VentaVendedor que apunta a la tabla 'ventas_vendedor'
-            db.session.bulk_insert_mappings(VentaVendedor, data_to_insert)
-            db.session.commit()
-
-        flash(f"✅ Carga Completa: {len(data_to_insert)} ventas procesadas correctamente.", "success")
-        
-        ultima = df_final['fecha'].max()
-        return redirect(url_for('ver_ventas_vendedor', fecha=ultima))
-
-    except Exception as e:
-        db.session.rollback()
-        # Imprimimos el error real en la consola de Render para debug
-        print(traceback.format_exc())
-        flash(f"❌ Error al procesar: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))  # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
+    flash("✔ Archivo procesado exitosamente.", "success")
+    return redirect(url_for("ver_ventas_vendedor"))
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
