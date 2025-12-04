@@ -1153,7 +1153,7 @@ import traceback
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
-    # Importamos numpy aquí por si no está arriba
+    # Importamos numpy aquí por si no está declarado arriba
     import numpy as np
 
     if 'archivo' not in request.files:
@@ -1164,10 +1164,10 @@ def subir_ventas_vendedor():
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        # 1. LECTURA DEL ARCHIVO (Optimizada)
+        # 1. LECTURA ULTRA-RÁPIDA (Motor C)
         if archivo.filename.lower().endswith('.csv'):
             try:
-                # Engine 'c' es más rápido
+                # 'header=None' porque buscaremos la cabecera real después
                 df_raw = pd.read_csv(archivo, header=None, engine='c') 
             except:
                 archivo.seek(0)
@@ -1175,9 +1175,9 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. Localizar cabecera REAL
+        # 2. LOCALIZAR CABECERA REAL
         fila_tabla = -1
-        # Búsqueda rápida solo en las primeras 50 filas
+        # Buscamos solo en las primeras 50 filas para no perder tiempo
         for i, row in df_raw.head(50).iterrows():
             row_txt = " ".join(row.astype(str).str.lower())
             if "vendedor" in row_txt and ("importe" in row_txt or "total" in row_txt):
@@ -1185,14 +1185,14 @@ def subir_ventas_vendedor():
                 break
 
         if fila_tabla == -1:
-            flash("❌ No se detectó la tabla de ventas.", "error")
+            flash("❌ No se detectó la tabla de ventas (falta 'Vendedor' o 'Importe').", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 3. ARMAR DATAFRAME
+        # 3. NORMALIZAR DATAFRAME
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla].astype(str).str.strip().str.lower()
 
-        # 4. MAPEO DE COLUMNAS
+        # 4. MAPEO INTELIGENTE DE COLUMNAS
         map_cols = {}
         for c in df.columns:
             if 'fecha' in c: map_cols[c] = 'Fecha'
@@ -1207,48 +1207,57 @@ def subir_ventas_vendedor():
 
         df = df.rename(columns=map_cols)
         
-        # Validar columnas mínimas
+        # Validaciones mínimas
         if 'Vendedor' not in df.columns or 'Importe' not in df.columns:
-            flash("❌ Faltan columnas Vendedor o Importe.", "error")
+            flash("❌ El archivo no tiene las columnas requeridas.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
         df = df.dropna(subset=['Vendedor'])
         
-        # 5. FECHAS (Vectorizado)
+        # 5. CONSTRUCCIÓN DE FECHA + HORA (Vectorizado)
+        # Esto genera la hora EXACTA del despacho para la comparación posterior
         if 'Hora' in df.columns:
             s_fecha = df['Fecha'].astype(str)
             s_hora = df['Hora'].astype(str)
-            # errors='coerce' transformará en NaT lo que falle, sin romper todo
             df['Fecha_DT'] = pd.to_datetime(s_fecha + ' ' + s_hora, dayfirst=True, errors='coerce')
         else:
             df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
             
         df = df.dropna(subset=['Fecha_DT'])
         
-        # Guardar string de fecha antes de ordenar
+        # Guardamos la fecha texto para filtrar duplicados
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
-        # 6. FILTRO DE EXISTENTES (Vectorizado)
+        # 6. FILTRO DE YA CARGADOS (Sin bucles)
         fechas_archivo = df['Fecha_Str'].unique().tolist()
         if not fechas_archivo:
              flash("❌ No se encontraron fechas válidas.", "error")
              return redirect(url_for('ver_ventas_vendedor'))
 
+        # Consultamos la tabla 'ventas_vendedor' a través del modelo VentaVendedor
         fechas_existentes = db.session.query(VentaVendedor.fecha).filter(
             VentaVendedor.user_id == current_user.id,
             VentaVendedor.fecha.in_(fechas_archivo)
         ).distinct().all()
         
         set_existentes = set([f[0] for f in fechas_existentes])
-        # Filtramos
         df_final = df[~df['Fecha_Str'].isin(set_existentes)].copy()
 
         if df_final.empty:
-            flash("⚠️ Todos los datos ya estaban cargados.", "warning")
+            flash("⚠️ Esas fechas ya estaban cargadas.", "warning")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 7. ASIGNAR FECHA OPERATIVA (MÉTODO ULTRA-RÁPIDO merge_asof)
-        # Traemos reportes VOX relevantes
+        # 7. ASIGNACIÓN DE TURNO/FECHA OPERATIVA (Algoritmo Ultrarrápido 'merge_asof')
+        
+        # A) Primero: Regla general (Si es < 06:00 AM, es día operativo anterior)
+        # Usamos numpy para hacerlo instantáneo en las miles de filas
+        horas = df_final['Fecha_DT'].dt.hour
+        dias_restar = np.where(horas < 6, 1, 0) # Si hora < 6, resta 1 día, sino 0
+        fechas_ajustadas = df_final['Fecha_DT'] - pd.to_timedelta(dias_restar, unit='D')
+        
+        df_final['Fecha_Op_Final'] = fechas_ajustadas.dt.strftime('%Y-%m-%d')
+
+        # B) Segundo: Ajuste Fino con VOX (Si existe reporte)
         min_f = df_final['Fecha_DT'].min() - timedelta(days=2)
         max_f = df_final['Fecha_DT'].max() + timedelta(days=2)
         
@@ -1259,54 +1268,42 @@ def subir_ventas_vendedor():
             Reporte.hora_apertura >= min_f,
             Reporte.hora_cierre <= max_f
         ).all()
-        
-        # 1. Definimos una columna por defecto (Fallback)
-        # Si es < 06:00 AM es del día anterior, sino del mismo día
-        # Esto se hace en C con numpy, instantáneo.
-        horas = df_final['Fecha_DT'].dt.hour
-        # Restamos 1 día si hora < 6, sino 0 días
-        fechas_ajustadas = df_final['Fecha_DT'] - pd.to_timedelta(np.where(horas < 6, 1, 0), unit='D')
-        df_final['Fecha_Op_Final'] = fechas_ajustadas.dt.strftime('%Y-%m-%d')
 
-        # 2. Si hay reportes VOX, hacemos el ajuste fino (Cruza horarios exactos)
         if reportes:
-            # Convertimos reportes a DataFrame
+            # Convertimos reportes a DataFrame para cruzar
             df_reps = pd.DataFrame([
                 {'r_apertura': r.hora_apertura, 'r_cierre': r.hora_cierre, 'r_fecha_op': r.fecha_operativa}
                 for r in reportes if r.hora_apertura and r.hora_cierre
             ])
             
             if not df_reps.empty:
-                # merge_asof requiere ordenar por fecha
+                # merge_asof requiere ordenar por tiempo
                 df_reps = df_reps.sort_values('r_apertura')
                 df_final = df_final.sort_values('Fecha_DT')
                 
-                # Búsqueda "ASOF" (As Of): Une la venta con el turno que EMPEZÓ antes de la venta
+                # CRUCE MÁGICO: Busca el turno que 'abrió' antes de la venta
                 df_merged = pd.merge_asof(
                     df_final, 
                     df_reps, 
                     left_on='Fecha_DT', 
                     right_on='r_apertura', 
-                    direction='backward' 
+                    direction='backward'
                 )
                 
-                # Verificamos si la venta realmente cayó DENTRO de ese turno (venta <= cierre)
-                # Si cumple, pisamos la fecha operativa con la de la VOX
-                mask_match = (
+                # Validamos: La venta debe ser <= al cierre de ese turno encontrado
+                mask_valido = (
                     pd.notna(df_merged['r_fecha_op']) & 
                     (df_merged['Fecha_DT'] <= df_merged['r_cierre'])
                 )
                 
-                # Sobrescribimos solo donde hubo coincidencia exacta
-                df_merged.loc[mask_match, 'Fecha_Op_Final'] = df_merged.loc[mask_match, 'r_fecha_op']
-                
+                # Solo donde coincide perfecto, usamos la fecha operativa de la VOX
+                df_merged.loc[mask_valido, 'Fecha_Op_Final'] = df_merged.loc[mask_valido, 'r_fecha_op']
                 df_final = df_merged
 
-        # 8. PREPARAR DATOS PARA BULK INSERT
-        # Limpieza numérica vectorizada
+        # 8. PREPARACIÓN FINAL (Limpieza Numérica Vectorizada)
         for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
             if col in df_final.columns:
-                # Convertir a string, limpiar caracteres y pasar a número
+                # Quitar $ y , de un solo golpe en toda la columna
                 df_final[col] = pd.to_numeric(
                     df_final[col].astype(str).str.replace(r'[$,]', '', regex=True), 
                     errors='coerce'
@@ -1314,47 +1311,47 @@ def subir_ventas_vendedor():
             else:
                 df_final[col] = 0
         
-        # Limpieza TipoPago
         if 'TipoPago' not in df_final.columns:
             df_final['TipoPago'] = ''
         else:
             df_final['TipoPago'] = df_final['TipoPago'].fillna('').astype(str).str.strip()
 
-        # Asignar columnas fijas
+        # 9. INSERTAR EN LA TABLA 'ventas_vendedor'
+        # Asignamos las columnas exactas que pide el modelo
         df_final['user_id'] = current_user.id
-        df_final['fecha'] = df_final['Fecha_Op_Final'] # Usamos la calculada
+        df_final['fecha'] = df_final['Fecha_Op_Final']
         df_final['vendedor'] = df_final['Vendedor']
         df_final['combustible'] = df_final['Combustible']
         df_final['litros'] = df_final['Litros']
         df_final['monto'] = df_final['Importe']
         df_final['precio'] = df_final['Precio']
-        # Usamos la hora real de la transacción
+        # AQUÍ ESTÁ LA CLAVE: Guardamos la hora exacta, no agrupada
         df_final['primer_horario'] = df_final['Fecha_DT'].dt.strftime('%H:%M:%S')
         df_final['tipo_pago'] = df_final['TipoPago']
         df_final['duracion_seg'] = df_final['DuracionSeg']
 
-        # Diccionario para SQL
         cols_db = ['user_id', 'fecha', 'vendedor', 'combustible', 'litros', 'monto', 
                    'precio', 'primer_horario', 'tipo_pago', 'duracion_seg']
         
-        # to_dict('records') es lo más rápido para SQLAlchemy bulk
+        # Convertimos a lista de diccionarios para SQLAlchemy
         data_to_insert = df_final[cols_db].to_dict('records')
 
         if data_to_insert:
+            # Usamos el modelo VentaVendedor que apunta a la tabla 'ventas_vendedor'
             db.session.bulk_insert_mappings(VentaVendedor, data_to_insert)
             db.session.commit()
 
-        flash(f"✅ Carga Éxitosa: {len(data_to_insert)} registros procesados.", "success")
+        flash(f"✅ Carga Completa: {len(data_to_insert)} ventas procesadas correctamente.", "success")
         
-        # Redirigir a la última fecha cargada
         ultima = df_final['fecha'].max()
         return redirect(url_for('ver_ventas_vendedor', fecha=ultima))
 
     except Exception as e:
         db.session.rollback()
+        # Imprimimos el error real en la consola de Render para debug
         print(traceback.format_exc())
         flash(f"❌ Error al procesar: {str(e)}", "error")
-        return redirect(url_for('ver_ventas_vendedor'))    # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
+        return redirect(url_for('ver_ventas_vendedor'))   # --- VISTA TIRADAS (LÓGICA INTELIGENTE DE TURNOS) ---
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
