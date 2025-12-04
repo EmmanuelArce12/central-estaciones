@@ -974,69 +974,77 @@ def ver_ventas_vendedor():
     t_l = 0; t_p = 0
     
     # 4. LÓGICA DE CLASIFICACIÓN ESTRICTA (Venta vs Rango VOX Individual)
-    # =====================================================
+# =====================================================
 # 4. NUEVA LÓGICA – CLASIFICACIÓN EXACTA POR RANGOS VOX
 # =====================================================
 
-# Primero unimos los rangos VOX reales por turno
-def construir_rangos_turnos(lista_reportes_dia):
-    rangos = {}
+    def construir_rangos_turnos(lista_reportes_dia):
+        try:
+            rangos = {}
 
-    for r in lista_reportes_dia:
-        turno = r['turno']
-        ap  = r['inicio_dt']
-        ci  = r['fin_dt']
+            for r in lista_reportes_dia:
+                turno = r['turno']
+                ap  = r['inicio_dt']
+                ci  = r['fin_dt']
 
-        if turno not in rangos:
-            rangos[turno] = {'ap': ap, 'ci': ci}
-        else:
-            if ap < rangos[turno]['ap']: rangos[turno]['ap'] = ap
-            if ci > rangos[turno]['ci']: rangos[turno]['ci'] = ci
+                if turno not in rangos:
+                    rangos[turno] = {'ap': ap, 'ci': ci}
+                else:
+                    if ap < rangos[turno]['ap']: rangos[turno]['ap'] = ap
+                    if ci > rangos[turno]['ci']: rangos[turno]['ci'] = ci
 
-    return {t: (d['ap'], d['ci']) for t, d in rangos.items()}
+            return {t: (d['ap'], d['ci']) for t, d in rangos.items()}
+        except Exception as e:
+            print("❌ Error en construir_rangos_turnos:", e)
+            return {}
 
-# Asignar venta a turno segun apertura/cierre VOX
     def asignar_vox(dt_venta, rangos_ordenados):
-        for idx, (turno, ap, ci) in enumerate(rangos_ordenados):
+        try:
+            for idx, (turno, ap, ci) in enumerate(rangos_ordenados):
 
-            # venta dentro del rango
-            if ap <= dt_venta <= ci:
-                return turno
-            
-            # venta DESPUÉS del cierre → siguiente turno
-            if dt_venta > ci:
-                if idx + 1 < len(rangos_ordenados):
-                    return rangos_ordenados[idx + 1][0]
-                else:
-                    return rangos_ordenados[0][0]  # siguiente día
-        
-            # venta ANTES de apertura → turno anterior
-            if dt_venta < ap:
-                if idx - 1 >= 0:
-                    return rangos_ordenados[idx - 1][0]
-                else:
-                    return rangos_ordenados[-1][0]
+                if ap <= dt_venta <= ci:
+                    return turno
 
-        return "Sin Asignar"
+                if dt_venta > ci:
+                    if idx + 1 < len(rangos_ordenados):
+                        return rangos_ordenados[idx + 1][0]
+                    else:
+                        return rangos_ordenados[0][0]
 
-    # Construimos rangos VOX reales para el día
+                if dt_venta < ap:
+                    if idx - 1 >= 0:
+                        return rangos_ordenados[idx - 1][0]
+                    else:
+                        return rangos_ordenados[-1][0]
+
+            return "Sin Asignar"
+
+        except Exception as e:
+            print("❌ Error en asignar_vox:", e)
+            return "Sin Asignar"
+
+
+    # Construcción de rangos VOX reales
     rangos = construir_rangos_turnos(lista_reportes_dia)
 
-    # Ordenamos por apertura
-    rangos_ordenados = sorted(
-        [(t, ap, ci) for t, (ap, ci) in rangos.items()],
-        key=lambda x: x[1]
-    )
+    # Si por algún motivo no hay rangos → no romper
+    try:
+        rangos_ordenados = sorted(
+            [(t, ap, ci) for t, (ap, ci) in rangos.items()],
+            key=lambda x: x[1]
+        )
+    except:
+        rangos_ordenados = []
 
-    # Limpio destino final
-    res = { "Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": [] }
+    # Limpiar estructura resultante
+    res = {"Mañana": [], "Tarde": [], "Noche": [], "Sin Asignar": []}
 
-    # Recorrido de ventas
+    # Procesar cada venta
     for v in ventas:
+
         t_l += v.litros
         t_p += v.monto
 
-        # Fecha + hora exacta del despacho
         try:
             dt_venta_str = f"{v.fecha} {v.primer_horario}"
             dt_venta = datetime.strptime(dt_venta_str, '%Y-%m-%d %H:%M:%S')
@@ -1044,9 +1052,12 @@ def construir_rangos_turnos(lista_reportes_dia):
             res["Sin Asignar"].append(v)
             continue
 
-        # Aplicar la lógica VOX B (sin fallback horario fijo)
-        turno_destino = asignar_vox(dt_venta, rangos_ordenados)
-        if turno_destino not in res:
+        try:
+            turno_destino = asignar_vox(dt_venta, rangos_ordenados)
+            if turno_destino not in res:
+                turno_destino = "Sin Asignar"
+        except Exception as e:
+            print("❌ Error asignando turno:", e)
             turno_destino = "Sin Asignar"
 
         res[turno_destino].append(v)
