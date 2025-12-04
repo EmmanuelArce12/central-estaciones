@@ -1150,7 +1150,7 @@ from datetime import timedelta
 import pandas as pd
 import traceback
 
-@app.route("/subir-ventas-vendedor", methods=["POST"])
+@app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
 
