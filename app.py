@@ -1284,6 +1284,7 @@ def subir_ventas_vendedor():
 
         count_global = 0
         BATCH_SIZE = 200  # óptimo para 512 MB
+        USER_ID = current_user.id
 
         for i, dia_str in enumerate(dias_procesar, 1):
             try:
@@ -1308,7 +1309,7 @@ def subir_ventas_vendedor():
                 else:
                     df_lote['TipoPago'] = df_lote['TipoPago'].fillna('').astype(str)
 
-                df_lote['user_id'] = current_user.id
+                df_lote['user_id'] = USER_ID
                 df_lote['fecha'] = df_lote['Fecha_Op_Final']
                 df_lote['vendedor'] = df_lote['Vendedor']
                 df_lote['combustible'] = df_lote.get('Combustible', '')
