@@ -1151,7 +1151,6 @@ from sqlalchemy import insert
 from datetime import timedelta
 import pandas as pd
 import traceback
-
 @app.route('/estacion/subir-ventas-vendedor', methods=['POST'])
 @login_required
 def subir_ventas_vendedor():
@@ -1159,6 +1158,9 @@ def subir_ventas_vendedor():
     import pandas as pd
     import traceback
     import gc
+
+    # 1. CAPTURA SEGURA DEL ID (Evita errores de sesión perdida)
+    USER_ID_FIJO = current_user.id 
 
     if 'archivo' not in request.files:
         return redirect(url_for('ver_ventas_vendedor'))
@@ -1171,7 +1173,7 @@ def subir_ventas_vendedor():
         print("📂 Iniciando lectura del archivo...")
 
         # ------------------------------------------------------------
-        # 1) LECTURA ROBUSTA
+        # 1) LECTURA ROBUSTA (Igual que antes)
         # ------------------------------------------------------------
         if archivo.filename.lower().endswith('.csv'):
             try:
@@ -1183,48 +1185,51 @@ def subir_ventas_vendedor():
             df_raw = pd.read_excel(archivo, header=None)
 
         # ------------------------------------------------------------
-        # 2) BUSCAR "DETALLE" Y CABECERA REAL
+        # 2) DETECCIÓN DE CABECERA (Igual que antes)
         # ------------------------------------------------------------
         fila_detalle = -1
         fila_tabla = -1
 
+        # Optimizamos la búsqueda convirtiendo solo una vez a string
+        df_str = df_raw.astype(str)
+
         for i, row in df_raw.iterrows():
-            row_txt = " ".join(row.astype(str).str.lower().tolist())
+            row_txt = " ".join(df_str.iloc[i].str.lower().tolist())
             if "detalle" in row_txt:
                 fila_detalle = i
-                print(f"✅ Bloque DETALLE detectado en fila {i}")
                 break
 
         if fila_detalle != -1:
+            # Buscamos la cabecera real
             for i in range(fila_detalle + 1, min(fila_detalle + 120, len(df_raw))):
-                row = df_raw.iloc[i]
-                textos = row.astype(str).str.lower().tolist()
-
+                row_txt = " ".join(df_str.iloc[i].str.lower().tolist())
                 score = 0
-                if any(("vendedor" in c or "operador" in c) for c in textos): score += 1
-                if any(("importe" in c or "total" in c or "monto" in c) for c in textos): score += 1
-                if any("fecha" in c for c in textos): score += 1
-                if any("hora" in c for c in textos): score += 1
-                if any(("producto" in c or "combustible" in c) for c in textos): score += 1
-
-                if score >= 3:
+                if "vendedor" in row_txt or "operador" in row_txt: score += 1
+                if "importe" in row_txt or "monto" in row_txt: score += 1
+                if "fecha" in row_txt: score += 1
+                
+                if score >= 2: # Bajamos exigencia para asegurar detección
                     fila_tabla = i
                     print(f"✅ CABECERA detectada en fila {i}")
                     break
 
         if fila_tabla == -1:
-            flash("❌ No se detectó la tabla debajo del bloque DETALLE.", "error")
+            flash("❌ No se detectó la estructura correcta del archivo.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
         # ------------------------------------------------------------
         # 3) NORMALIZAR DATAFRAME
         # ------------------------------------------------------------
+        # Cortamos el DF para liberar la parte de arriba de la memoria
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla].astype(str).str.strip().str.lower()
+        
+        # Eliminamos df_raw y df_str inmediatamente para liberar RAM
+        del df_raw
+        del df_str
+        gc.collect()
 
-        # ------------------------------------------------------------
-        # 4) MAPEO FLEXIBLE
-        # ------------------------------------------------------------
+        # Mapeo de columnas
         map_cols = {}
         for c in df.columns:
             if 'fecha' in c: map_cols[c] = 'Fecha'
@@ -1238,15 +1243,10 @@ def subir_ventas_vendedor():
             elif 'tipo' in c and ('pago' in c or 'venta' in c): map_cols[c] = 'TipoPago'
 
         df = df.rename(columns=map_cols)
-
-        if 'Vendedor' not in df.columns or 'Importe' not in df.columns:
-            flash("❌ Faltan columnas requeridas.", "error")
-            return redirect(url_for('ver_ventas_vendedor'))
-
         df = df.dropna(subset=['Vendedor'])
 
         # ------------------------------------------------------------
-        # 5) FECHA + HORA
+        # 4) PROCESAR FECHAS Y FILTRAR REPETIDOS
         # ------------------------------------------------------------
         if 'Hora' in df.columns:
             df['Fecha_DT'] = pd.to_datetime(
@@ -1259,42 +1259,50 @@ def subir_ventas_vendedor():
         df = df.dropna(subset=['Fecha_DT'])
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
-        # ------------------------------------------------------------
-        # 6) FILTRO DE FECHAS YA CARGADAS
-        # ------------------------------------------------------------
+        # Verificamos fechas ya cargadas en base de datos
         fechas_archivo = df['Fecha_Str'].unique().tolist()
-
+        
+        # Usamos USER_ID_FIJO aquí
         fechas_existentes = db.session.query(VentaVendedor.fecha).filter(
-            VentaVendedor.user_id == current_user.id,
+            VentaVendedor.user_id == USER_ID_FIJO,
             VentaVendedor.fecha.in_(fechas_archivo)
         ).distinct().all()
 
         set_existentes = set(f[0] for f in fechas_existentes)
+        
+        # Nos quedamos solo con lo nuevo
         df_todo = df[~df['Fecha_Str'].isin(set_existentes)].copy()
+        
+        # Liberamos el DF intermedio
+        del df 
+        gc.collect()
 
         if df_todo.empty:
-            flash("⚠️ Esas fechas ya estaban cargadas.", "warning")
+            flash("⚠️ Las fechas del archivo ya estaban cargadas.", "warning")
             return redirect(url_for('ver_ventas_vendedor'))
 
         # ------------------------------------------------------------
-        # ✅ 7) PROCESO COMPLETO SIN CORTES
+        # ✅ 5) LOOP OPTIMIZADO PARA MEMORIA (Día por Día)
         # ------------------------------------------------------------
         dias_procesar = sorted(df_todo['Fecha_Str'].unique())
-        total_dias = len(dias_procesar)
-
         count_global = 0
-        BATCH_SIZE = 200  # óptimo para 512 MB
-        USER_ID = current_user.id
+        BATCH_DB = 500  # Insertar en base de datos de a 500 filas
+
+        print(f"🚀 Procesando {len(dias_procesar)} días nuevos...")
 
         for i, dia_str in enumerate(dias_procesar, 1):
             try:
+                # A. Crear sub-dataframe SOLO para este día
                 df_lote = df_todo[df_todo['Fecha_Str'] == dia_str].copy()
 
+                # B. Calcular fechas operativas (Madrugada)
                 horas = df_lote['Fecha_DT'].dt.hour
+                # Si es antes de las 6AM, resta 1 día
                 dias_restar = np.where(horas < 6, 1, 0)
                 fechas_ajustadas = df_lote['Fecha_DT'] - pd.to_timedelta(dias_restar, unit='D')
                 df_lote['Fecha_Op_Final'] = fechas_ajustadas.dt.strftime('%Y-%m-%d')
 
+                # C. Limpieza numérica
                 for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
                     if col in df_lote.columns:
                         df_lote[col] = pd.to_numeric(
@@ -1304,70 +1312,65 @@ def subir_ventas_vendedor():
                     else:
                         df_lote[col] = 0
 
-                if 'TipoPago' not in df_lote.columns:
-                    df_lote['TipoPago'] = ''
-                else:
-                    df_lote['TipoPago'] = df_lote['TipoPago'].fillna('').astype(str)
+                # D. Preparar diccionario para SQLAlchemy
+                # (Usamos USER_ID_FIJO, no current_user)
+                registros = []
+                for _, row in df_lote.iterrows():
+                    registros.append({
+                        'user_id': USER_ID_FIJO,
+                        'fecha': row['Fecha_Op_Final'],
+                        'vendedor': str(row['Vendedor']),
+                        'combustible': str(row.get('Combustible', '')),
+                        'litros': float(row['Litros']),
+                        'monto': float(row['Importe']),
+                        'precio': float(row['Precio']),
+                        'primer_horario': row['Fecha_DT'].strftime('%H:%M:%S'),
+                        'tipo_pago': str(row.get('TipoPago', '')),
+                        'duracion_seg': float(row['DuracionSeg'])
+                    })
 
-                df_lote['user_id'] = USER_ID
-                df_lote['fecha'] = df_lote['Fecha_Op_Final']
-                df_lote['vendedor'] = df_lote['Vendedor']
-                df_lote['combustible'] = df_lote.get('Combustible', '')
-                df_lote['litros'] = df_lote['Litros']
-                df_lote['monto'] = df_lote['Importe']
-                df_lote['precio'] = df_lote['Precio']
-                df_lote['primer_horario'] = df_lote['Fecha_DT'].dt.strftime('%H:%M:%S')
-                df_lote['tipo_pago'] = df_lote['TipoPago']
-                df_lote['duracion_seg'] = df_lote['DuracionSeg']
+                # E. Inserción por lotes (DB Batching)
+                for j in range(0, len(registros), BATCH_DB):
+                    chunk = registros[j:j + BATCH_DB]
+                    db.session.bulk_insert_mappings(VentaVendedor, chunk)
+                    db.session.commit() # Confirmar bloque
+                    
+                count_global += len(registros)
+                print(f"   ✅ Día {dia_str} guardado ({len(registros)} ventas).")
 
-                cols_db = [
-                    'user_id', 'fecha', 'vendedor', 'combustible', 'litros',
-                    'monto', 'precio', 'primer_horario', 'tipo_pago', 'duracion_seg'
-                ]
-
-                data_lote = df_lote[cols_db].to_dict('records')
-
-                total = len(data_lote)
-
-                for j in range(0, total, BATCH_SIZE):
-                    sub_lote = data_lote[j:j + BATCH_SIZE]
-
-                    db.session.bulk_insert_mappings(VentaVendedor, sub_lote)
-                    db.session.commit()
-
-                    count_global += len(sub_lote)
-
-                    db.session.expunge_all()
-                    del sub_lote
-                    gc.collect()
-
-                print(f"✅ [{i}/{total_dias}] Día {dia_str} guardado: {total} ventas")
+                # F. LIMPIEZA CRÍTICA DE MEMORIA
+                # Liberamos variables locales del bucle
+                del df_lote
+                del registros
+                del dias_restar
+                del fechas_ajustadas
+                
+                # Vaciamos la memoria de la sesión de SQLAlchemy sin cerrar la conexión
+                db.session.expire_all() 
+                
+                # Forzamos al sistema a limpiar RAM ahora mismo
+                gc.collect()
 
             except Exception as e_lote:
                 db.session.rollback()
-                print(f"⚠️ Error día {dia_str}: {e_lote}")
-
-            del df_lote
-            del data_lote
-            gc.collect()
-            db.session.close()
+                print(f"🔥 Error procesando día {dia_str}: {e_lote}")
+                # Seguimos con el siguiente día, no frenamos todo
 
         # ------------------------------------------------------------
-        # ✅ 8) MENSAJE FINAL
+        # 6) FIN EXITOSO
         # ------------------------------------------------------------
-        flash(
-            f"✅ Carga completa finalizada: {len(dias_procesar)} días procesados. "
-            f"{count_global} ventas cargadas con liberación total de memoria.",
-            "success"
-        )
+        # Limpieza final
+        del df_todo
+        gc.collect()
 
-        ultima = dias_procesar[-1]
-        return redirect(url_for('ver_ventas_vendedor', fecha=ultima))
+        flash(f"✅ Éxito: Se cargaron {count_global} ventas de {len(dias_procesar)} días.", "success")
+        return redirect(url_for('ver_ventas_vendedor', fecha=dias_procesar[-1] if dias_procesar else None))
 
     except Exception as e:
+        # Aquí sí es seguro cerrar o hacer rollback final
         db.session.rollback()
         print(traceback.format_exc())
-        flash(f"❌ Error crítico: {str(e)}", "error")
+        flash(f"❌ Error crítico en archivo: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
 
 @app.route('/estacion/tiradas', methods=['GET'])
