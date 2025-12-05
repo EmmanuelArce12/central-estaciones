@@ -1159,7 +1159,6 @@ def subir_ventas_vendedor():
     import pandas as pd
     import traceback
     import gc
-    from datetime import timedelta
 
     if 'archivo' not in request.files:
         return redirect(url_for('ver_ventas_vendedor'))
@@ -1172,7 +1171,7 @@ def subir_ventas_vendedor():
         print("📂 Iniciando lectura del archivo...")
 
         # ------------------------------------------------------------
-        # 1) LECTURA ROBUSTA DEL ARCHIVO
+        # 1) LECTURA ROBUSTA
         # ------------------------------------------------------------
         if archivo.filename.lower().endswith('.csv'):
             try:
@@ -1184,7 +1183,7 @@ def subir_ventas_vendedor():
             df_raw = pd.read_excel(archivo, header=None)
 
         # ------------------------------------------------------------
-        # 2) BUSCAR BLOQUE "DETALLE" Y LUEGO LA CABECERA REAL
+        # 2) BUSCAR "DETALLE" Y CABECERA REAL
         # ------------------------------------------------------------
         fila_detalle = -1
         fila_tabla = -1
@@ -1197,7 +1196,7 @@ def subir_ventas_vendedor():
                 break
 
         if fila_detalle != -1:
-            for i in range(fila_detalle + 1, min(fila_detalle + 80, len(df_raw))):
+            for i in range(fila_detalle + 1, min(fila_detalle + 120, len(df_raw))):
                 row = df_raw.iloc[i]
                 textos = row.astype(str).str.lower().tolist()
 
@@ -1224,7 +1223,7 @@ def subir_ventas_vendedor():
         df.columns = df_raw.iloc[fila_tabla].astype(str).str.strip().str.lower()
 
         # ------------------------------------------------------------
-        # 4) MAPEO FLEXIBLE DE COLUMNAS
+        # 4) MAPEO FLEXIBLE
         # ------------------------------------------------------------
         map_cols = {}
         for c in df.columns:
@@ -1278,18 +1277,13 @@ def subir_ventas_vendedor():
             return redirect(url_for('ver_ventas_vendedor'))
 
         # ------------------------------------------------------------
-        # ✅ 7) CORTE POR RAM: PROCESAR SOLO 15 DÍAS
+        # ✅ 7) PROCESO COMPLETO SIN CORTES
         # ------------------------------------------------------------
-        dias_unicos = sorted(df_todo['Fecha_Str'].unique())
-        total_dias = len(dias_unicos)
+        dias_procesar = sorted(df_todo['Fecha_Str'].unique())
+        total_dias = len(dias_procesar)
 
-        MAX_DIAS_POR_EJECUCION = 15
-        dias_procesar = dias_unicos[:MAX_DIAS_POR_EJECUCION]
-
-        # ------------------------------------------------------------
-        # 8) CARGA POR LOTES + LIMPIEZA DE MEMORIA
-        # ------------------------------------------------------------
         count_global = 0
+        BATCH_SIZE = 200  # óptimo para 512 MB
 
         for i, dia_str in enumerate(dias_procesar, 1):
             try:
@@ -1332,28 +1326,37 @@ def subir_ventas_vendedor():
 
                 data_lote = df_lote[cols_db].to_dict('records')
 
-                if data_lote:
-                    db.session.bulk_insert_mappings(VentaVendedor, data_lote)
-                    db.session.commit()
-                    count_global += len(data_lote)
+                total = len(data_lote)
 
-                print(f"✅ [{i}/{len(dias_procesar)}] Día {dia_str} guardado: {len(data_lote)} ventas")
+                for j in range(0, total, BATCH_SIZE):
+                    sub_lote = data_lote[j:j + BATCH_SIZE]
+
+                    db.session.bulk_insert_mappings(VentaVendedor, sub_lote)
+                    db.session.commit()
+
+                    count_global += len(sub_lote)
+
+                    db.session.expunge_all()
+                    del sub_lote
+                    gc.collect()
+
+                print(f"✅ [{i}/{total_dias}] Día {dia_str} guardado: {total} ventas")
 
             except Exception as e_lote:
                 db.session.rollback()
                 print(f"⚠️ Error día {dia_str}: {e_lote}")
 
-            # ✅ LIMPIEZA DE RAM EN CADA ITERACIÓN
             del df_lote
             del data_lote
             gc.collect()
+            db.session.close()
 
         # ------------------------------------------------------------
-        # ✅ 9) MENSAJE FINAL REAL
+        # ✅ 8) MENSAJE FINAL
         # ------------------------------------------------------------
         flash(
-            f"✅ Carga segura finalizada: {len(dias_procesar)} días procesados de {total_dias} disponibles. "
-            f"{count_global} ventas cargadas. Si quedan días pendientes, vuelva a subir el mismo archivo.",
+            f"✅ Carga completa finalizada: {len(dias_procesar)} días procesados. "
+            f"{count_global} ventas cargadas con liberación total de memoria.",
             "success"
         )
 
@@ -1365,6 +1368,7 @@ def subir_ventas_vendedor():
         print(traceback.format_exc())
         flash(f"❌ Error crítico: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
+
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
