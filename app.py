@@ -2,11 +2,13 @@ import os
 import secrets
 import difflib
 import pandas as pd
+import numpy as np
 import json
 import random
 import io
 import traceback # Nuevo para ver errores reales
 import re
+import gc
 from collections import Counter
 from sqlalchemy import func
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
@@ -1154,7 +1156,10 @@ import traceback
 @login_required
 def subir_ventas_vendedor():
     import numpy as np
-    import time
+    import pandas as pd
+    import traceback
+    import gc
+    from datetime import timedelta
 
     if 'archivo' not in request.files:
         return redirect(url_for('ver_ventas_vendedor'))
@@ -1165,155 +1170,154 @@ def subir_ventas_vendedor():
 
     try:
         print("📂 Iniciando lectura del archivo...")
-        
-        # 1. LECTURA ULTRA-RÁPIDA
+
+        # ------------------------------------------------------------
+        # 1) LECTURA ROBUSTA DEL ARCHIVO
+        # ------------------------------------------------------------
         if archivo.filename.lower().endswith('.csv'):
             try:
-                df_raw = pd.read_csv(archivo, header=None, engine='c') 
+                df_raw = pd.read_csv(archivo, header=None, engine='c')
             except:
                 archivo.seek(0)
                 df_raw = pd.read_csv(archivo, sep=';', header=None, engine='python')
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # 2. LOCALIZAR CABECERA
+        # ------------------------------------------------------------
+        # 2) BUSCAR BLOQUE "DETALLE" Y LUEGO LA CABECERA REAL
+        # ------------------------------------------------------------
+        fila_detalle = -1
         fila_tabla = -1
-        for i, row in df_raw.head(50).iterrows():
-            row_txt = " ".join(row.astype(str).str.lower())
-            if "vendedor" in row_txt and ("importe" in row_txt or "total" in row_txt):
-                fila_tabla = i
+
+        for i, row in df_raw.iterrows():
+            row_txt = " ".join(row.astype(str).str.lower().tolist())
+            if "detalle" in row_txt:
+                fila_detalle = i
+                print(f"✅ Bloque DETALLE detectado en fila {i}")
                 break
 
+        if fila_detalle != -1:
+            for i in range(fila_detalle + 1, min(fila_detalle + 80, len(df_raw))):
+                row = df_raw.iloc[i]
+                textos = row.astype(str).str.lower().tolist()
+
+                score = 0
+                if any(("vendedor" in c or "operador" in c) for c in textos): score += 1
+                if any(("importe" in c or "total" in c or "monto" in c) for c in textos): score += 1
+                if any("fecha" in c for c in textos): score += 1
+                if any("hora" in c for c in textos): score += 1
+                if any(("producto" in c or "combustible" in c) for c in textos): score += 1
+
+                if score >= 3:
+                    fila_tabla = i
+                    print(f"✅ CABECERA detectada en fila {i}")
+                    break
+
         if fila_tabla == -1:
-            flash("❌ No se detectó la tabla de ventas.", "error")
+            flash("❌ No se detectó la tabla debajo del bloque DETALLE.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # 3. NORMALIZAR
+        # ------------------------------------------------------------
+        # 3) NORMALIZAR DATAFRAME
+        # ------------------------------------------------------------
         df = df_raw.iloc[fila_tabla + 1:].copy()
         df.columns = df_raw.iloc[fila_tabla].astype(str).str.strip().str.lower()
 
-        # 4. MAPEO
+        # ------------------------------------------------------------
+        # 4) MAPEO FLEXIBLE DE COLUMNAS
+        # ------------------------------------------------------------
         map_cols = {}
         for c in df.columns:
             if 'fecha' in c: map_cols[c] = 'Fecha'
             elif 'hora' in c: map_cols[c] = 'Hora'
-            elif 'vendedor' in c: map_cols[c] = 'Vendedor'
+            elif 'vendedor' in c or 'operador' in c: map_cols[c] = 'Vendedor'
             elif 'producto' in c or 'combustible' in c: map_cols[c] = 'Combustible'
             elif 'vol' in c or 'litro' in c: map_cols[c] = 'Litros'
-            elif 'importe' in c or 'total' in c: map_cols[c] = 'Importe'
+            elif 'importe' in c or 'total' in c or 'monto' in c: map_cols[c] = 'Importe'
             elif 'precio' in c: map_cols[c] = 'Precio'
             elif 'duracion' in c: map_cols[c] = 'DuracionSeg'
             elif 'tipo' in c and ('pago' in c or 'venta' in c): map_cols[c] = 'TipoPago'
 
         df = df.rename(columns=map_cols)
-        
+
         if 'Vendedor' not in df.columns or 'Importe' not in df.columns:
             flash("❌ Faltan columnas requeridas.", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
         df = df.dropna(subset=['Vendedor'])
-        
-        # 5. FECHA + HORA (Vectorizado)
+
+        # ------------------------------------------------------------
+        # 5) FECHA + HORA
+        # ------------------------------------------------------------
         if 'Hora' in df.columns:
-            s_fecha = df['Fecha'].astype(str)
-            s_hora = df['Hora'].astype(str)
-            df['Fecha_DT'] = pd.to_datetime(s_fecha + ' ' + s_hora, dayfirst=True, errors='coerce')
+            df['Fecha_DT'] = pd.to_datetime(
+                df['Fecha'].astype(str) + ' ' + df['Hora'].astype(str),
+                dayfirst=True, errors='coerce'
+            )
         else:
             df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-            
+
         df = df.dropna(subset=['Fecha_DT'])
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
 
-        # 6. FILTRO DE DUPLICADOS (Global)
+        # ------------------------------------------------------------
+        # 6) FILTRO DE FECHAS YA CARGADAS
+        # ------------------------------------------------------------
         fechas_archivo = df['Fecha_Str'].unique().tolist()
-        if not fechas_archivo:
-             flash("❌ No se encontraron fechas válidas.", "error")
-             return redirect(url_for('ver_ventas_vendedor'))
 
-        print(f"🔎 Verificando fechas existentes para {len(fechas_archivo)} días...")
         fechas_existentes = db.session.query(VentaVendedor.fecha).filter(
             VentaVendedor.user_id == current_user.id,
             VentaVendedor.fecha.in_(fechas_archivo)
         ).distinct().all()
-        
-        set_existentes = set([f[0] for f in fechas_existentes])
+
+        set_existentes = set(f[0] for f in fechas_existentes)
         df_todo = df[~df['Fecha_Str'].isin(set_existentes)].copy()
 
         if df_todo.empty:
             flash("⚠️ Esas fechas ya estaban cargadas.", "warning")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # ---------------------------------------------------------
-        # ESTRATEGIA: CARGA DÍA POR DÍA (BATCH)
-        # ---------------------------------------------------------
-        
-        # A) Pre-cargar reportes VOX de todo el rango (para no consultar DB 30 veces)
-        min_f = df_todo['Fecha_DT'].min() - timedelta(days=2)
-        max_f = df_todo['Fecha_DT'].max() + timedelta(days=2)
-        
-        print("📥 Descargando reportes VOX para cruce...")
-        reportes_db = db.session.query(
-            Reporte.hora_apertura, Reporte.hora_cierre, Reporte.fecha_operativa
-        ).filter(
-            Reporte.user_id == current_user.id,
-            Reporte.hora_apertura >= min_f,
-            Reporte.hora_cierre <= max_f
-        ).all()
-        
-        # Convertir reportes a DataFrame una sola vez
-        df_reps = pd.DataFrame()
-        if reportes_db:
-            df_reps = pd.DataFrame([
-                {'r_apertura': r.hora_apertura, 'r_cierre': r.hora_cierre, 'r_fecha_op': r.fecha_operativa}
-                for r in reportes_db if r.hora_apertura and r.hora_cierre
-            ])
-            if not df_reps.empty:
-                df_reps = df_reps.sort_values('r_apertura')
-
-        # B) Iterar por cada día único detectado en el archivo
+        # ------------------------------------------------------------
+        # ✅ 7) CORTE POR RAM: PROCESAR SOLO 15 DÍAS
+        # ------------------------------------------------------------
         dias_unicos = sorted(df_todo['Fecha_Str'].unique())
         total_dias = len(dias_unicos)
-        
-        print(f"🚀 Iniciando carga por lotes: {total_dias} días a procesar.")
+
+        MAX_DIAS_POR_EJECUCION = 15
+        dias_procesar = dias_unicos[:MAX_DIAS_POR_EJECUCION]
+
+        # ------------------------------------------------------------
+        # 8) CARGA POR LOTES + LIMPIEZA DE MEMORIA
+        # ------------------------------------------------------------
         count_global = 0
 
-        for i, dia_str in enumerate(dias_unicos, 1):
+        for i, dia_str in enumerate(dias_procesar, 1):
             try:
-                # 1. Separar lote
                 df_lote = df_todo[df_todo['Fecha_Str'] == dia_str].copy()
-                
-                # 2. Lógica de Turno (Vectorizada pero aplicada al lote)
+
                 horas = df_lote['Fecha_DT'].dt.hour
                 dias_restar = np.where(horas < 6, 1, 0)
                 fechas_ajustadas = df_lote['Fecha_DT'] - pd.to_timedelta(dias_restar, unit='D')
                 df_lote['Fecha_Op_Final'] = fechas_ajustadas.dt.strftime('%Y-%m-%d')
 
-                # Cruce con VOX
-                if not df_reps.empty:
-                    df_lote = df_lote.sort_values('Fecha_DT')
-                    df_merged = pd.merge_asof(
-                        df_lote, df_reps, left_on='Fecha_DT', right_on='r_apertura', direction='backward'
-                    )
-                    mask_valido = (pd.notna(df_merged['r_fecha_op']) & (df_merged['Fecha_DT'] <= df_merged['r_cierre']))
-                    df_merged.loc[mask_valido, 'Fecha_Op_Final'] = df_merged.loc[mask_valido, 'r_fecha_op']
-                    df_lote = df_merged
-
-                # 3. Limpieza Numérica
                 for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
                     if col in df_lote.columns:
                         df_lote[col] = pd.to_numeric(
-                            df_lote[col].astype(str).str.replace(r'[$,]', '', regex=True), errors='coerce'
+                            df_lote[col].astype(str).str.replace(r'[$,]', '', regex=True),
+                            errors='coerce'
                         ).fillna(0)
-                    else: df_lote[col] = 0
-                
-                if 'TipoPago' not in df_lote.columns: df_lote['TipoPago'] = ''
-                else: df_lote['TipoPago'] = df_lote['TipoPago'].fillna('').astype(str).str.strip()
+                    else:
+                        df_lote[col] = 0
 
-                # 4. Preparar Insert
+                if 'TipoPago' not in df_lote.columns:
+                    df_lote['TipoPago'] = ''
+                else:
+                    df_lote['TipoPago'] = df_lote['TipoPago'].fillna('').astype(str)
+
                 df_lote['user_id'] = current_user.id
                 df_lote['fecha'] = df_lote['Fecha_Op_Final']
                 df_lote['vendedor'] = df_lote['Vendedor']
-                df_lote['combustible'] = df_lote['Combustible']
+                df_lote['combustible'] = df_lote.get('Combustible', '')
                 df_lote['litros'] = df_lote['Litros']
                 df_lote['monto'] = df_lote['Importe']
                 df_lote['precio'] = df_lote['Precio']
@@ -1321,28 +1325,39 @@ def subir_ventas_vendedor():
                 df_lote['tipo_pago'] = df_lote['TipoPago']
                 df_lote['duracion_seg'] = df_lote['DuracionSeg']
 
-                cols_db = ['user_id', 'fecha', 'vendedor', 'combustible', 'litros', 'monto', 
-                           'precio', 'primer_horario', 'tipo_pago', 'duracion_seg']
-                
+                cols_db = [
+                    'user_id', 'fecha', 'vendedor', 'combustible', 'litros',
+                    'monto', 'precio', 'primer_horario', 'tipo_pago', 'duracion_seg'
+                ]
+
                 data_lote = df_lote[cols_db].to_dict('records')
 
                 if data_lote:
                     db.session.bulk_insert_mappings(VentaVendedor, data_lote)
-                    db.session.commit() # <--- GUARDADO PARCIAL: Si falla el siguiente, este ya quedó.
+                    db.session.commit()
                     count_global += len(data_lote)
-                    
-                # 5. CONTADOR EN LOGS
-                print(f"   --> [{i}/{total_dias}] Día {dia_str} procesado: {len(data_lote)} registros guardados.")
+
+                print(f"✅ [{i}/{len(dias_procesar)}] Día {dia_str} guardado: {len(data_lote)} ventas")
 
             except Exception as e_lote:
-                print(f"⚠️ Error procesando día {dia_str}: {e_lote}")
                 db.session.rollback()
-                # Continuar con el siguiente día aunque falle uno
-                continue
+                print(f"⚠️ Error día {dia_str}: {e_lote}")
 
-        flash(f"✅ Proceso Finalizado: Se cargaron {count_global} ventas de {total_dias} días procesados.", "success")
-        
-        ultima = sorted(df_todo['Fecha_Op_Final'].unique())[-1] if not df_todo.empty else datetime.now().strftime('%Y-%m-%d')
+            # ✅ LIMPIEZA DE RAM EN CADA ITERACIÓN
+            del df_lote
+            del data_lote
+            gc.collect()
+
+        # ------------------------------------------------------------
+        # ✅ 9) MENSAJE FINAL REAL
+        # ------------------------------------------------------------
+        flash(
+            f"✅ Carga segura finalizada: {len(dias_procesar)} días procesados de {total_dias} disponibles. "
+            f"{count_global} ventas cargadas. Si quedan días pendientes, vuelva a subir el mismo archivo.",
+            "success"
+        )
+
+        ultima = dias_procesar[-1]
         return redirect(url_for('ver_ventas_vendedor', fecha=ultima))
 
     except Exception as e:
