@@ -9,13 +9,26 @@
         .dashboard-container { background: white; width: 100%; max-width: 600px; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; }
         h1 { color: #333; margin-bottom: 5px; }
         .subtitle { color: #666; margin-bottom: 30px; }
+        
         .modules-grid { display: flex; flex-direction: column; gap: 15px; text-align: left; }
-        .dashboard-card { display: flex; align-items: center; text-decoration: none; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #eee; border-left: 5px solid #ccc; transition: transform 0.2s, box-shadow 0.2s; }
-        .dashboard-card:hover { transform: translateX(5px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-        .card-icon { font-size: 2rem; margin-right: 20px; min-width: 40px; text-align: center; }
-        .card-content h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #2c3e50; }
+        
+        .dashboard-card { 
+            display: flex; align-items: center; text-decoration: none; 
+            background: white; border-radius: 10px; padding: 20px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #eee; 
+            border-left: 5px solid #ccc; transition: transform 0.2s, box-shadow 0.2s; 
+        }
+        .dashboard-card:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        
+        .card-icon { font-size: 2rem; margin-right: 20px; width: 40px; text-align: center; }
+        .card-content h3 { margin: 0 0 5px 0; color: #2c3e50; font-size: 1.1rem; }
         .card-content p { margin: 0; font-size: 0.9rem; color: #7f8c8d; }
-        .card-cyan { border-left-color: #17a2b8; } .card-purple { border-left-color: #8e44ad; } .card-blue { border-left-color: #007bff; }
+        
+        /* Colores de las tarjetas */
+        .card-cyan { border-left-color: #17a2b8; } 
+        .card-purple { border-left-color: #8e44ad; } 
+        .card-blue { border-left-color: #007bff; }
+        
         .logout { margin-top: 30px; display: inline-block; color: #dc3545; text-decoration: none; font-size: 14px; font-weight: 500; }
         .logout:hover { text-decoration: underline; }
     </style>
@@ -24,21 +37,34 @@
     <div class="dashboard-container">
         <h1>Hola, {{ user.username }}</h1>
         <p class="subtitle">Panel de Control de Estación</p>
+        
         <div class="modules-grid">
-            <a href="/estacion/ventas-vendedor" class="dashboard-card card-cyan">
+            <a href="{{ url_for('ver_ventas_vendedor') }}" class="dashboard-card card-cyan">
                 <div class="card-icon">👨‍⚕️</div>
-                <div class="card-content"><h3>Ventas por Vendedor</h3><p>Cargar Excel de ventas.</p></div>
+                <div class="card-content">
+                    <h3>Ventas por Vendedor</h3>
+                    <p>Cargar Excel de ventas.</p>
+                </div>
             </a>
-            <a href="/estacion/tiradas" class="dashboard-card card-purple">
+            
+            <a href="{{ url_for('tiradas') }}" class="dashboard-card card-purple">
                 <div class="card-icon">💸</div>
-                <div class="card-content"><h3>Control de Tiradas</h3><p>Control de sobres y efectivo.</p></div>
+                <div class="card-content">
+                    <h3>Control de Tiradas</h3>
+                    <p>Control de sobres y efectivo.</p>
+                </div>
             </a>
-            <a href="/estacion/ver-reportes" class="dashboard-card card-blue">
-                <div class="card-icon">📊</div>
-                <div class="card-content"><h3>Gráficos y Reportes</h3><p>Historial y actualización de datos.</p></div>
+
+            <a href="{{ url_for('medios_pagos') }}" class="dashboard-card card-blue">
+                <div class="card-icon">📱</div>
+                <div class="card-content">
+                    <h3>Medios de Pago Electrónicos</h3>
+                    <p>Procesar App YPF y Mercado Pago.</p>
+                </div>
             </a>
         </div>
-        <a href="/logout" class="logout">Cerrar Sesión</a>
+
+        <a href="{{ url_for('logout') }}" class="logout">Cerrar Sesión</a>
     </div>
 </body>
 </html>

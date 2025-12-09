@@ -216,6 +216,8 @@ class Reporte(db.Model):
     hora_cierre = db.Column(db.DateTime)
     hora_apertura = db.Column(db.DateTime)
 
+
+# En app.py, busca la clase VentaVendedor y agrega la columna 'surtidor'
 class VentaVendedor(db.Model):
     __tablename__ = 'ventas_vendedor'
     id = db.Column(db.Integer, primary_key=True)
@@ -228,8 +230,9 @@ class VentaVendedor(db.Model):
     monto = db.Column(db.Float)
     primer_horario = db.Column(db.String(50)) 
     tipo_pago = db.Column(db.String(50))      
-    duracion_seg = db.Column(db.Float)        
-
+    duracion_seg = db.Column(db.Float)
+    # NUEVA COLUMNA
+    surtidor = db.Column(db.Integer, default=0)
 class Tirada(db.Model):
     __tablename__ = 'tiradas'
     id = db.Column(db.Integer, primary_key=True)
@@ -251,7 +254,25 @@ class Tirada(db.Model):
     b100 = db.Column(db.Integer, default=0)
     cant_billetes = db.Column(db.Integer, default=0)
     detalle_extra = db.Column(db.String(255)) 
-
+# NUEVA TABLA para App YPF y Mercado Pago
+class PagoElectronico(db.Model):
+    __tablename__ = 'pagos_electronicos'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    origen = db.Column(db.String(20)) # 'MERCADO PAGO' o 'APP YPF'
+    fecha = db.Column(db.String(20))
+    hora = db.Column(db.String(20))
+    surtidor = db.Column(db.Integer)
+    monto = db.Column(db.Float)
+    
+    # Campos adicionales App YPF
+    area = db.Column(db.String(50))
+    producto = db.Column(db.String(100))
+    descuento = db.Column(db.Float, default=0.0)
+    redencion = db.Column(db.Float, default=0.0)
+    
+    # El vendedor se obtiene directo en App YPF, o por cruce en MP
+    vendedor = db.Column(db.String(100))
 with app.app_context():
     try: db.create_all()
     except Exception as e: print(f"⚠️ Advertencia DB: {e}")
@@ -1159,24 +1180,20 @@ def subir_ventas_vendedor():
     import pandas as pd
     import traceback
     import gc
-    import time  # <--- Nuevo: Para el "descanso"
+    import time
 
-    # 1. CAPTURA ID USUARIO (Vital para no perder la sesión)
-    USER_ID_FIJO = current_user.id 
-
+    USER_ID_FIJO = current_user.id
+    
     if 'archivo' not in request.files:
         return redirect(url_for('ver_ventas_vendedor'))
-
     archivo = request.files['archivo']
     if archivo.filename == '':
         return redirect(url_for('ver_ventas_vendedor'))
 
     try:
-        print("📂 [RAM] Iniciando lectura del archivo...")
-
-        # ------------------------------------------------------------
-        # 1) LECTURA DEL ARCHIVO (Mantenemos esto igual para detectar formato)
-        # ------------------------------------------------------------
+        print("📂 [RAM] Iniciando lectura del archivo de Ventas...")
+        
+        # 1) LECTURA DEL ARCHIVO
         if archivo.filename.lower().endswith('.csv'):
             try:
                 df_raw = pd.read_csv(archivo, header=None, engine='c')
@@ -1186,14 +1203,10 @@ def subir_ventas_vendedor():
         else:
             df_raw = pd.read_excel(archivo, header=None)
 
-        # ------------------------------------------------------------
         # 2) DETECCIÓN INTELIGENTE DE CABECERA
-        # ------------------------------------------------------------
         fila_tabla = -1
-        # Convertimos a string solo una vez para buscar rápido
         df_str = df_raw.astype(str)
-
-        # Buscamos "detalle" y luego la cabecera real
+        
         fila_detalle = -1
         for i, row in df_raw.iterrows():
             row_txt = " ".join(df_str.iloc[i].str.lower().tolist())
@@ -1201,182 +1214,122 @@ def subir_ventas_vendedor():
                 fila_detalle = i
                 break
         
-        start_search = fila_detalle + 1 if fila_detalle != -1 else 0
-        
-        for i in range(start_search, min(start_search + 150, len(df_raw))):
-            row_txt = " ".join(df_str.iloc[i].str.lower().tolist())
-            score = 0
-            if "vendedor" in row_txt or "operador" in row_txt: score += 1
-            if "importe" in row_txt or "monto" in row_txt: score += 1
-            if "fecha" in row_txt: score += 1
-            
-            if score >= 2:
-                fila_tabla = i
-                print(f"✅ CABECERA detectada en fila {i}")
-                break
+        start_row = fila_detalle + 1 if fila_detalle != -1 else 0
 
+        # Buscamos la fila que tenga 'fecha', 'vendedor' y ('producto' o 'combustible')
+        for i in range(start_row, min(start_row + 20, len(df_raw))):
+            row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].tolist()]
+            if 'fecha' in row_vals and ('vendedor' in row_vals or 'operador' in row_vals):
+                fila_tabla = i
+                break
+        
         if fila_tabla == -1:
-            flash("❌ No se encontró la cabecera (Fecha, Vendedor, Importe).", "error")
+            flash("❌ No se encontró la tabla de ventas (buscando 'Fecha' y 'Vendedor').", "error")
             return redirect(url_for('ver_ventas_vendedor'))
 
-        # ------------------------------------------------------------
-        # 3) LIMPIEZA INICIAL DE RAM
-        # ------------------------------------------------------------
-        # Recortamos el DF y borramos lo que sobra inmediatamente
-        df = df_raw.iloc[fila_tabla + 1:].copy()
-        df.columns = df_raw.iloc[fila_tabla].astype(str).str.strip().str.lower()
+        # 3) MAPEO DE COLUMNAS
+        df = df_raw.iloc[fila_tabla+1:].copy()
+        df.columns = [str(x).strip() for x in df_raw.iloc[fila_tabla]]
         
-        del df_raw # Borrar el original gigante
-        del df_str
-        gc.collect() # Forzar limpieza RAM ahora mismo
-
-        # Renombrar columnas
         map_cols = {}
         for c in df.columns:
-            if 'fecha' in c: map_cols[c] = 'Fecha'
-            elif 'hora' in c: map_cols[c] = 'Hora'
-            elif 'vendedor' in c or 'operador' in c: map_cols[c] = 'Vendedor'
-            elif 'producto' in c or 'combustible' in c: map_cols[c] = 'Combustible'
-            elif 'vol' in c or 'litro' in c: map_cols[c] = 'Litros'
-            elif 'importe' in c or 'total' in c or 'monto' in c: map_cols[c] = 'Importe'
-            elif 'precio' in c: map_cols[c] = 'Precio'
-            elif 'duracion' in c: map_cols[c] = 'DuracionSeg'
-            elif 'tipo' in c and ('pago' in c or 'venta' in c): map_cols[c] = 'TipoPago'
+            cl = c.lower()
+            if 'fecha' in cl and 'dt' not in cl: map_cols[c] = 'Fecha'
+            elif 'hora' in cl: map_cols[c] = 'Hora'
+            elif 'vendedor' in cl or 'operador' in cl: map_cols[c] = 'Vendedor'
+            elif 'producto' in cl or 'combustible' in cl: map_cols[c] = 'Combustible'
+            elif 'vol' in cl or 'litro' in cl: map_cols[c] = 'Litros'
+            elif 'importe' in cl or 'total' in cl or 'monto' in cl: map_cols[c] = 'Importe'
+            elif 'precio' in cl: map_cols[c] = 'Precio'
+            elif 'duracion' in cl: map_cols[c] = 'DuracionSeg'
+            elif 'tipo' in cl and ('pago' in cl or 'venta' in cl): map_cols[c] = 'TipoPago'
+            # [NUEVO] Detectar Surtidor
+            elif 'surtidor' in cl or 'boca' in cl or 'manguera' in cl: map_cols[c] = 'Surtidor'
 
         df = df.rename(columns=map_cols)
         df = df.dropna(subset=['Vendedor'])
 
-        # ------------------------------------------------------------
         # 4) PREPARACIÓN DE FECHAS
-        # ------------------------------------------------------------
-        # Convertimos fecha para poder ordenar y dividir por lotes
         if 'Hora' in df.columns:
             df['Fecha_DT'] = pd.to_datetime(
-                df['Fecha'].astype(str) + ' ' + df['Hora'].astype(str),
+                df['Fecha'].astype(str) + ' ' + df['Hora'].astype(str), 
                 dayfirst=True, errors='coerce'
             )
         else:
             df['Fecha_DT'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-
+            
         df = df.dropna(subset=['Fecha_DT'])
         df['Fecha_Str'] = df['Fecha_DT'].dt.strftime('%Y-%m-%d')
-        
-        # ------------------------------------------------------------
-        # 🚀 ESTRATEGIA: LOTES DE 3 DÍAS + DESCANSO RAM
-        # ------------------------------------------------------------
-        
-        # 1. Obtenemos lista única de días ordenados
+
+        # 🚀 PROCESAMIENTO POR LOTES
         dias_unicos = sorted(df['Fecha_Str'].unique())
-        total_dias = len(dias_unicos)
-        
-        # 2. Configuración de lotes
         DIAS_POR_LOTE = 3
         count_global = 0
-        
-        print(f"📦 Estrategia: Procesar {total_dias} días en grupos de {DIAS_POR_LOTE}...")
 
-        # Iteramos saltando de 3 en 3 (ej: 0, 3, 6...)
-        for i in range(0, total_dias, DIAS_POR_LOTE):
-            
-            # A. Seleccionar los días del lote actual
+        for i in range(0, len(dias_unicos), DIAS_POR_LOTE):
             grupo_dias = dias_unicos[i : i + DIAS_POR_LOTE]
-            print(f"   ▶️ Procesando lote {i//DIAS_POR_LOTE + 1}: {grupo_dias}")
+            
+            df_chunk = df[df['Fecha_Str'].isin(grupo_dias)].copy()
+            
+            # Limpiar datos previos
+            db.session.query(VentaVendedor).filter(
+                VentaVendedor.user_id == USER_ID_FIJO,
+                VentaVendedor.fecha.in_(grupo_dias)
+            ).delete(synchronize_session=False)
 
-            try:
-                # B. Filtrar DF solo para estos días (Crear DF pequeño)
-                df_chunk = df[df['Fecha_Str'].isin(grupo_dias)].copy()
+            registros = []
+            for _, row in df_chunk.iterrows():
+                fecha_str = row['Fecha_Str']
+                nombre_final = str(row['Vendedor']).strip().upper()
 
-                # C. Verificar duplicados SOLO para este lote (Consulta DB liviana)
-                fechas_db = db.session.query(VentaVendedor.fecha).filter(
-                    VentaVendedor.user_id == USER_ID_FIJO,
-                    VentaVendedor.fecha.in_(grupo_dias)
-                ).distinct().all()
-                
-                dias_existentes = set(f[0] for f in fechas_db)
-                
-                # Descartar días ya cargados del chunk
-                df_chunk = df_chunk[~df_chunk['Fecha_Str'].isin(dias_existentes)]
-                
-                if df_chunk.empty:
-                    print("     (Saltado: días ya existen)")
-                    del df_chunk
-                    gc.collect()
-                    continue
+                # [NUEVO] Extracción segura de Surtidor
+                surtidor_val = 0
+                if 'Surtidor' in row:
+                    try:
+                        # Limpia caracteres raros, deja solo números
+                        txt_surt = str(row['Surtidor'])
+                        nums = re.findall(r'\d+', txt_surt)
+                        if nums:
+                            surtidor_val = int(nums[0])
+                    except:
+                        surtidor_val = 0
 
-                # D. Ajuste de Fechas Operativas (Madrugada)
-                horas = df_chunk['Fecha_DT'].dt.hour
-                dias_restar = np.where(horas < 6, 1, 0)
-                fechas_ajustadas = df_chunk['Fecha_DT'] - pd.to_timedelta(dias_restar, unit='D')
-                df_chunk['Fecha_Op_Final'] = fechas_ajustadas.dt.strftime('%Y-%m-%d')
+                registros.append({
+                    'user_id': USER_ID_FIJO,
+                    'fecha': fecha_str,
+                    'vendedor': nombre_final,
+                    'combustible': str(row.get('Combustible', '')),
+                    'litros': float(row['Litros']),
+                    'monto': float(row['Importe']),
+                    'precio': float(row['Precio']),
+                    'primer_horario': row['Fecha_DT'].strftime('%H:%M:%S'),
+                    'tipo_pago': str(row.get('TipoPago', '')),
+                    'duracion_seg': float(row.get('DuracionSeg', 0)),
+                    'surtidor': surtidor_val  # <--- GUARDADO
+                })
 
-                # E. Limpieza de números
-                for col in ['Litros', 'Importe', 'Precio', 'DuracionSeg']:
-                    if col in df_chunk.columns:
-                        df_chunk[col] = pd.to_numeric(
-                            df_chunk[col].astype(str).str.replace(r'[$,]', '', regex=True),
-                            errors='coerce'
-                        ).fillna(0)
-                    else:
-                        df_chunk[col] = 0
+            if registros:
+                db.session.bulk_insert_mappings(VentaVendedor, registros)
+                db.session.commit()
+                count_global += len(registros)
+            
+            # Liberar memoria
+            del df_chunk, registros
+            db.session.expire_all()
+            gc.collect()
+            time.sleep(1)
 
-                # F. Convertir a diccionarios (Más rápido para SQL)
-                registros = []
-                for _, row in df_chunk.iterrows():
-                    registros.append({
-                        'user_id': USER_ID_FIJO,
-                        'fecha': row['Fecha_Op_Final'],
-                        'vendedor': str(row['Vendedor']),
-                        'combustible': str(row.get('Combustible', '')),
-                        'litros': float(row['Litros']),
-                        'monto': float(row['Importe']),
-                        'precio': float(row['Precio']),
-                        'primer_horario': row['Fecha_DT'].strftime('%H:%M:%S'),
-                        'tipo_pago': str(row.get('TipoPago', '')),
-                        'duracion_seg': float(row['DuracionSeg'])
-                    })
-
-                # G. Insertar en bloque
-                if registros:
-                    db.session.bulk_insert_mappings(VentaVendedor, registros)
-                    db.session.commit()
-                    count_global += len(registros)
-                    print(f"     ✅ Guardados {len(registros)} registros.")
-
-                # H. LIMPIEZA AGRESIVA POST-LOTE
-                del df_chunk
-                del registros
-                del fechas_ajustadas
-                del dias_restar
-                
-                # Desvincular objetos de la sesión para liberar RAM de SQLAlchemy
-                db.session.expire_all()
-                
-                # Forzar recolección de basura del sistema
-                gc.collect()
-
-                # I. EL "DESCANSO" SOLICITADO
-                # Dormir 1 segundo permite al SO reclamar páginas de memoria y bajar CPU
-                time.sleep(1) 
-
-            except Exception as e_chunk:
-                print(f"🔥 Error en lote {grupo_dias}: {e_chunk}")
-                db.session.rollback()
-                # No frenamos, intentamos el siguiente lote
-
-        # ------------------------------------------------------------
-        # 5) FIN DEL PROCESO
-        # ------------------------------------------------------------
-        del df # Borrar el DF maestro final
+        del df
         gc.collect()
         
-        flash(f"✅ Proceso finalizado. Se cargaron {count_global} nuevas ventas.", "success")
+        flash(f"✅ Se cargaron {count_global} ventas con información de surtidores.", "success")
         return redirect(url_for('ver_ventas_vendedor'))
 
     except Exception as e:
-        print(traceback.format_exc())
-        flash(f"❌ Error crítico: {str(e)}", "error")
+        print(f"🔥 Error procesando ventas: {e}")
+        traceback.print_exc()
+        flash(f"Error procesando archivo: {str(e)}", "error")
         return redirect(url_for('ver_ventas_vendedor'))
-
 @app.route('/estacion/tiradas', methods=['GET'])
 @login_required
 def ver_tiradas_web(): 
@@ -1456,5 +1409,188 @@ def ver_tiradas_web():
                            fecha=fecha, 
                            t_plata=total_plata, 
                            t_sobres=len(tiradas))
+@app.route('/estacion/medios-pagos', methods=['GET', 'POST'])
+@login_required
+def medios_pagos():
+    msg = ""
+    if request.method == 'POST':
+        if 'archivo' not in request.files:
+            return render_template('medios_pagos.html', msg="No se subió archivo")
+        
+        archivo = request.files['archivo']
+        if not archivo.filename:
+            return render_template('medios_pagos.html', msg="Archivo vacío")
+
+        try:
+            # Leer archivo (Soporte CSV y Excel)
+            filename = archivo.filename.lower()
+            if filename.endswith('.csv'):
+                df = pd.read_csv(archivo, encoding='utf-8', sep=None, engine='python')
+            else:
+                df = pd.read_excel(archivo)
+
+            # Normalizar columnas a minúsculas para detectar tipo
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            cols = list(df.columns)
+
+            count = 0
+            
+            # --- DETECCIÓN: MERCADO PAGO ---
+            # Buscamos columnas típicas: "external_id", "operation_id", "payment_type"
+            if any("external_id" in c for c in cols) and any("operation_id" in c for c in cols):
+                
+                # Mapeo de columnas basado en tu descripción
+                col_fecha = next((c for c in cols if "fecha" in c or "date_created" in c), None)
+                col_caja = next((c for c in cols if "external_id" in c or "caja externo" in c), None)
+                col_monto = next((c for c in cols if "transaction_amount" in c or "valor del producto" in c), None)
+
+                for _, row in df.iterrows():
+                    # 1. Extraer Surtidor (ej: "s739y5" -> 5)
+                    caja_str = str(row[col_caja]).strip().lower()
+                    
+                    # Extraer números al final del string
+                    nums = re.findall(r'\d+', caja_str)
+                    if not nums: continue
+                    
+                    surtidor_raw = int(nums[-1]) # El último número
+                    
+                    # FILTRO: Ignorar 101 (Shop), quedarse con 1-6 (Playa)
+                    if surtidor_raw == 101: continue
+                    if not (1 <= surtidor_raw <= 20): continue # Rango seguridad
+
+                    # 2. Fecha y Hora
+                    fecha_raw = str(row[col_fecha])
+                    try:
+                        dt_obj = pd.to_datetime(fecha_raw, dayfirst=True)
+                        fecha_str = dt_obj.strftime('%Y-%m-%d')
+                        hora_str = dt_obj.strftime('%H:%M:%S')
+                    except: continue
+
+                    monto = float(row[col_monto])
+
+                    # 3. CRUCE DE DATOS: Buscar vendedor en esa fecha, hora y surtidor
+                    # Buscamos una venta en ese surtidor +/- 15 minutos
+                    vendedor_encontrado = "Desconocido (MP)"
+                    
+                    # Convertimos la hora de la transaccion a objeto time para comparar
+                    t_pago = dt_obj.time()
+                    
+                    # Query para buscar ventas cercanas del mismo usuario
+                    ventas_candidatas = VentaVendedor.query.filter_by(
+                        user_id=current_user.id,
+                        fecha=fecha_str,
+                        surtidor=surtidor_raw
+                    ).all()
+
+                    mejor_diferencia = 999999
+                    
+                    for v in ventas_candidatas:
+                        try:
+                            # v.primer_horario viene como HH:MM:SS
+                            hv_obj = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
+                            
+                            # Calcular diferencia en segundos (simplificado)
+                            diff = abs(
+                                (hv_obj.hour * 3600 + hv_obj.minute * 60 + hv_obj.second) - 
+                                (t_pago.hour * 3600 + t_pago.minute * 60 + t_pago.second)
+                            )
+                            
+                            # Si la diferencia es menor a 15 min (900 seg) y es la mejor hasta ahora
+                            if diff < 900 and diff < mejor_diferencia:
+                                mejor_diferencia = diff
+                                vendedor_encontrado = v.vendedor
+                        except: pass
+
+                    # Insertar
+                    pago = PagoElectronico(
+                        user_id=current_user.id,
+                        origen='MERCADO PAGO',
+                        fecha=fecha_str,
+                        hora=hora_str,
+                        surtidor=surtidor_raw,
+                        monto=monto,
+                        vendedor=vendedor_encontrado,
+                        area='Playa' # Asumido por el filtro de surtidor
+                    )
+                    db.session.add(pago)
+                    count += 1
+                
+                msg = f"✅ Procesados {count} registros de Mercado Pago."
+
+            # --- DETECCIÓN: APP YPF ---
+            # Buscamos columnas: "motor de pago", "redenciones", "auto despacho"
+            elif any("motor de pago" in c for c in cols) and any("redenciones" in c for c in cols):
+                
+                col_fecha = next((c for c in cols if c == "fecha"), None)
+                col_hora = next((c for c in cols if c == "hora"), None)
+                col_area = next((c for c in cols if "área" in c), None)
+                col_pto_venta = next((c for c in cols if "punto de venta" in c), None)
+                col_importe = next((c for c in cols if c == "importe"), None) # Importe puro
+                col_vendedor = next((c for c in cols if "nombre del vendedor" in c), None)
+                col_prod = next((c for c in cols if c == "productos"), None)
+                col_desc = next((c for c in cols if "descuentos" in c), None)
+                col_red = next((c for c in cols if "redenciones" in c), None)
+
+                for _, row in df.iterrows():
+                    # 1. Filtro Área: Solo "Playa"
+                    area = str(row[col_area]).strip()
+                    if "playa" not in area.lower(): continue
+
+                    # 2. Extraer Surtidor (Punto de venta)
+                    pv_str = str(row[col_pto_venta]).strip() # ej: "#73916"
+                    nums = re.findall(r'\d+', pv_str)
+                    if not nums: continue
+                    surtidor_raw = int(nums[-1]) # Último dígito (ej: 6)
+                    
+                    # FILTRO 101
+                    if surtidor_raw == 101: continue
+
+                    # 3. Fechas
+                    fecha_str = str(row[col_fecha]) # Asumimos viene limpia o formatear si es necesario
+                    # A veces excel trae fecha como 2025-12-08 00:00:00
+                    if " " in fecha_str: fecha_str = fecha_str.split(" ")[0]
+                    
+                    hora_str = str(row[col_hora])
+
+                    # 4. Datos directos
+                    vend = str(row[col_vendedor])
+                    prod = str(row[col_prod])
+                    monto = float(str(row[col_importe]).replace(',',''))
+                    desc = float(str(row[col_desc] or 0).replace(',',''))
+                    red = float(str(row[col_red] or 0).replace(',',''))
+
+                    pago = PagoElectronico(
+                        user_id=current_user.id,
+                        origen='APP YPF',
+                        fecha=fecha_str,
+                        hora=hora_str,
+                        surtidor=surtidor_raw,
+                        monto=monto,
+                        vendedor=vend, # Aquí el vendedor YA VIENE en el excel
+                        area=area,
+                        producto=prod,
+                        descuento=desc,
+                        redencion=red
+                    )
+                    db.session.add(pago)
+                    count += 1
+
+                msg = f"✅ Procesados {count} registros de App YPF."
+
+            else:
+                msg = "⚠️ Formato de archivo no reconocido (¿Es App YPF o Mercado Pago?)"
+
+            db.session.commit()
+
+        except Exception as e:
+            msg = f"❌ Error procesando: {str(e)}"
+            traceback.print_exc()
+
+    # Obtener últimos pagos para mostrar en la tabla de abajo
+    pagos = PagoElectronico.query.filter_by(user_id=current_user.id).order_by(PagoElectronico.id.desc()).limit(50).all()
+    
+    return render_template('medios_pagos.html', msg=msg, pagos=pagos)
+
+
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=10000)
