@@ -1413,9 +1413,12 @@ def ver_tiradas_web():
 @login_required
 def medios_pagos():
     msg = ""
+    # Aseguramos que 're' esté importado, si no está arriba, lo usamos aquí
+    import re 
+    
     if request.method == 'POST':
         if 'archivo' not in request.files:
-            return render_template('medios_pagos.html', msg="No se subió archivo")
+            return render_template('medios_pagos.html', msg="Falta archivo")
         
         archivo = request.files['archivo']
         if not archivo.filename:
@@ -1425,84 +1428,79 @@ def medios_pagos():
             # Leer archivo (Soporte CSV y Excel)
             filename = archivo.filename.lower()
             if filename.endswith('.csv'):
-                df = pd.read_csv(archivo, encoding='utf-8', sep=None, engine='python')
+                try:
+                    df = pd.read_csv(archivo, encoding='utf-8', sep=None, engine='python')
+                except:
+                    df = pd.read_csv(archivo, encoding='latin1', sep=None, engine='python')
             else:
                 df = pd.read_excel(archivo)
 
-            # Normalizar columnas a minúsculas para detectar tipo
+            # Normalizar columnas a minúsculas
             df.columns = [str(c).strip().lower() for c in df.columns]
             cols = list(df.columns)
-
             count = 0
             
-            # --- DETECCIÓN: MERCADO PAGO ---
-            # Buscamos columnas típicas: "external_id", "operation_id", "payment_type"
+            # ---------------------------------------------------------
+            # DETECCIÓN 1: MERCADO PAGO (Collection)
+            # ---------------------------------------------------------
             if any("external_id" in c for c in cols) and any("operation_id" in c for c in cols):
                 
-                # Mapeo de columnas basado en tu descripción
+                # Mapeo de columnas MP
                 col_fecha = next((c for c in cols if "fecha" in c or "date_created" in c), None)
                 col_caja = next((c for c in cols if "external_id" in c or "caja externo" in c), None)
                 col_monto = next((c for c in cols if "transaction_amount" in c or "valor del producto" in c), None)
 
                 for _, row in df.iterrows():
-                    # 1. Extraer Surtidor (ej: "s739y5" -> 5)
-                    caja_str = str(row[col_caja]).strip().lower()
-                    
-                    # Extraer números al final del string
+                    # A. Extraer Surtidor (ej: "s739y5" -> 5)
+                    caja_str = str(row.get(col_caja, '')).strip().lower()
                     nums = re.findall(r'\d+', caja_str)
+                    
                     if not nums: continue
+                    surtidor_raw = int(nums[-1]) # Tomamos el último número
                     
-                    surtidor_raw = int(nums[-1]) # El último número
-                    
-                    # FILTRO: Ignorar 101 (Shop), quedarse con 1-6 (Playa)
+                    # FILTRO: Ignorar 101, tomar solo Playa (ej: 1-20)
                     if surtidor_raw == 101: continue
-                    if not (1 <= surtidor_raw <= 20): continue # Rango seguridad
-
-                    # 2. Fecha y Hora
-                    fecha_raw = str(row[col_fecha])
+                    
+                    # B. Fechas
+                    fecha_raw = str(row.get(col_fecha, ''))
                     try:
                         dt_obj = pd.to_datetime(fecha_raw, dayfirst=True)
                         fecha_str = dt_obj.strftime('%Y-%m-%d')
                         hora_str = dt_obj.strftime('%H:%M:%S')
                     except: continue
 
-                    monto = float(row[col_monto])
+                    monto = float(row.get(col_monto, 0))
 
-                    # 3. CRUCE DE DATOS: Buscar vendedor en esa fecha, hora y surtidor
-                    # Buscamos una venta en ese surtidor +/- 15 minutos
+                    # C. CRUCE DE DATOS: Buscar vendedor por cercanía horaria
                     vendedor_encontrado = "Desconocido (MP)"
                     
-                    # Convertimos la hora de la transaccion a objeto time para comparar
-                    t_pago = dt_obj.time()
-                    
-                    # Query para buscar ventas cercanas del mismo usuario
+                    # Buscar ventas en ese surtidor ese día
                     ventas_candidatas = VentaVendedor.query.filter_by(
                         user_id=current_user.id,
                         fecha=fecha_str,
                         surtidor=surtidor_raw
                     ).all()
 
-                    mejor_diferencia = 999999
+                    t_pago = dt_obj.time()
+                    pago_seg = t_pago.hour * 3600 + t_pago.minute * 60 + t_pago.second
+                    
+                    mejor_diff = 3600 # Max 1 hora de diferencia aceptable
                     
                     for v in ventas_candidatas:
                         try:
-                            # v.primer_horario viene como HH:MM:SS
-                            hv_obj = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
+                            hv = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
+                            venta_seg = hv.hour * 3600 + hv.minute * 60 + hv.second
                             
-                            # Calcular diferencia en segundos (simplificado)
-                            diff = abs(
-                                (hv_obj.hour * 3600 + hv_obj.minute * 60 + hv_obj.second) - 
-                                (t_pago.hour * 3600 + t_pago.minute * 60 + t_pago.second)
-                            )
+                            # Diferencia absoluta en segundos
+                            diff = abs(venta_seg - pago_seg)
                             
-                            # Si la diferencia es menor a 15 min (900 seg) y es la mejor hasta ahora
-                            if diff < 900 and diff < mejor_diferencia:
-                                mejor_diferencia = diff
+                            if diff < mejor_diff:
+                                mejor_diff = diff
                                 vendedor_encontrado = v.vendedor
                         except: pass
 
-                    # Insertar
-                    pago = PagoElectronico(
+                    # D. Guardar
+                    nuevo = PagoElectronico(
                         user_id=current_user.id,
                         origen='MERCADO PAGO',
                         fecha=fecha_str,
@@ -1510,87 +1508,106 @@ def medios_pagos():
                         surtidor=surtidor_raw,
                         monto=monto,
                         vendedor=vendedor_encontrado,
-                        area='Playa' # Asumido por el filtro de surtidor
+                        area='Playa'
                     )
-                    db.session.add(pago)
+                    db.session.add(nuevo)
                     count += 1
                 
-                msg = f"✅ Procesados {count} registros de Mercado Pago."
+                msg = f"✅ Procesados {count} cobros de Mercado Pago."
 
-            # --- DETECCIÓN: APP YPF ---
-            # Buscamos columnas: "motor de pago", "redenciones", "auto despacho"
+            # ---------------------------------------------------------
+            # DETECCIÓN 2: APP YPF (Reporte de Transacciones)
+            # ---------------------------------------------------------
             elif any("motor de pago" in c for c in cols) and any("redenciones" in c for c in cols):
                 
+                # --- Función interna de limpieza de valores YPF ---
+                def limpiar_valor_ypf(valor):
+                    texto = str(valor).strip()
+                    # 1. Cortar texto basura: tomar solo lo que sigue al primer $
+                    if '$' in texto:
+                        partes = texto.split('$')
+                        if len(partes) > 1:
+                            texto = partes[1]
+                    
+                    # 2. Buscar primer número válido
+                    match = re.search(r'[\d\.,]+', texto)
+                    if match:
+                        num_str = match.group(0)
+                        # Normalizar (1.000,00 -> 1000.00)
+                        if '.' in num_str and ',' in num_str:
+                            num_str = num_str.replace('.', '').replace(',', '.')
+                        elif ',' in num_str:
+                            num_str = num_str.replace(',', '.')
+                        
+                        try: return float(num_str)
+                        except: return 0.0
+                    
+                    try: return float(texto)
+                    except: return 0.0
+
                 col_fecha = next((c for c in cols if c == "fecha"), None)
                 col_hora = next((c for c in cols if c == "hora"), None)
                 col_area = next((c for c in cols if "área" in c), None)
                 col_pto_venta = next((c for c in cols if "punto de venta" in c), None)
-                col_importe = next((c for c in cols if c == "importe"), None) # Importe puro
+                col_importe = next((c for c in cols if "importe" == c or "importe total" in c), None)
                 col_vendedor = next((c for c in cols if "nombre del vendedor" in c), None)
                 col_prod = next((c for c in cols if c == "productos"), None)
                 col_desc = next((c for c in cols if "descuentos" in c), None)
                 col_red = next((c for c in cols if "redenciones" in c), None)
 
                 for _, row in df.iterrows():
-                    # 1. Filtro Área: Solo "Playa"
-                    area = str(row[col_area]).strip()
+                    # A. Filtro Playa
+                    area = str(row.get(col_area, '')).strip()
                     if "playa" not in area.lower(): continue
 
-                    # 2. Extraer Surtidor (Punto de venta)
-                    pv_str = str(row[col_pto_venta]).strip() # ej: "#73916"
+                    # B. Surtidor (descartar 101)
+                    pv_str = str(row.get(col_pto_venta, ''))
                     nums = re.findall(r'\d+', pv_str)
                     if not nums: continue
-                    surtidor_raw = int(nums[-1]) # Último dígito (ej: 6)
-                    
-                    # FILTRO 101
+                    surtidor_raw = int(nums[-1])
                     if surtidor_raw == 101: continue
 
-                    # 3. Fechas
-                    fecha_str = str(row[col_fecha]) # Asumimos viene limpia o formatear si es necesario
-                    # A veces excel trae fecha como 2025-12-08 00:00:00
-                    if " " in fecha_str: fecha_str = fecha_str.split(" ")[0]
-                    
-                    hora_str = str(row[col_hora])
+                    # C. Datos
+                    fecha_str = str(row.get(col_fecha, '')).split(" ")[0]
+                    hora_str = str(row.get(col_hora, ''))
+                    vend = str(row.get(col_vendedor, ''))
+                    prod = str(row.get(col_prod, ''))
 
-                    # 4. Datos directos
-                    vend = str(row[col_vendedor])
-                    prod = str(row[col_prod])
-                    monto = float(str(row[col_importe]).replace(',',''))
-                    desc = float(str(row[col_desc] or 0).replace(',',''))
-                    red = float(str(row[col_red] or 0).replace(',',''))
+                    # D. Montos limpios
+                    monto = limpiar_valor_ypf(row.get(col_importe, 0))
+                    desc = limpiar_valor_ypf(row.get(col_desc, 0))
+                    red = limpiar_valor_ypf(row.get(col_red, 0))
 
-                    pago = PagoElectronico(
+                    nuevo = PagoElectronico(
                         user_id=current_user.id,
                         origen='APP YPF',
                         fecha=fecha_str,
                         hora=hora_str,
                         surtidor=surtidor_raw,
                         monto=monto,
-                        vendedor=vend, # Aquí el vendedor YA VIENE en el excel
+                        vendedor=vend,
                         area=area,
                         producto=prod,
                         descuento=desc,
                         redencion=red
                     )
-                    db.session.add(pago)
+                    db.session.add(nuevo)
                     count += 1
 
-                msg = f"✅ Procesados {count} registros de App YPF."
+                msg = f"✅ Procesados {count} transacciones de App YPF."
 
             else:
-                msg = "⚠️ Formato de archivo no reconocido (¿Es App YPF o Mercado Pago?)"
+                msg = "⚠️ Formato no reconocido (¿Es App YPF o Mercado Pago?)"
 
             db.session.commit()
 
         except Exception as e:
-            msg = f"❌ Error procesando: {str(e)}"
             traceback.print_exc()
+            msg = f"❌ Error: {str(e)}"
 
-    # Obtener últimos pagos para mostrar en la tabla de abajo
+    # Mostrar últimos pagos cargados
     pagos = PagoElectronico.query.filter_by(user_id=current_user.id).order_by(PagoElectronico.id.desc()).limit(50).all()
     
     return render_template('medios_pagos.html', msg=msg, pagos=pagos)
-
-
 if __name__ == '__main__': 
     app.run(host='0.0.0.0', port=80)
