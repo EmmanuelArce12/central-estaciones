@@ -1444,24 +1444,43 @@ def medios_pagos():
             
             else:
                 import io
+                from openpyxl import load_workbook
 
                 try:
-                    # ✅ LECTURA SEGURA PARA EXCEL DE MERCADO PAGO (ESTILOS ROTOS)
+                    # ✅ LECTURA A PRUEBA DE ESTILOS ROTOS (SOLUCIÓN DEFINITIVA)
                     archivo_bytes = archivo.read()
                     archivo.seek(0)
 
-                    df = pd.read_excel(
+                    wb = load_workbook(
                         io.BytesIO(archivo_bytes),
-                        engine="openpyxl",
-                        dtype=str,
-                        sheet_name=0
+                        read_only=True,
+                        data_only=True
                     )
+
+                    ws = wb.active
+
+                    data = []
+                    for row in ws.iter_rows(values_only=True):
+                        data.append(list(row))
+
+                    # Convertimos a DataFrame
+                    df = pd.DataFrame(data)
+
+                    # Usar primera fila como encabezado
+                    df.columns = df.iloc[0]
+                    df = df.iloc[1:].reset_index(drop=True)
+
+                    # Normalizar columnas
+                    df.columns = [str(c).strip().lower() for c in df.columns]
+
+                    print("✅ Excel cargado correctamente ignorando estilos.")
 
                 except Exception as e:
                     print("❌ Error real leyendo Excel:", str(e))
                     traceback.print_exc()
                     msg = f"❌ Error Crítico al leer el Excel: {str(e)}"
                     return render_template('medios_pagos.html', msg=msg)
+
 
 
 
