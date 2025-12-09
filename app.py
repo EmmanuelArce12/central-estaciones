@@ -1407,12 +1407,12 @@ def ver_tiradas_web():
     return render_template('tiradas.html', 
                            tiradas_por_turno=datos_agrupados, 
                            fecha=fecha, 
-                           t_plata=total_plata, 
-                           t_sobres=len(tiradas))
+                           t_plata=total_plata,)
 @app.route('/estacion/medios-pagos', methods=['GET', 'POST'])
 @login_required
 def medios_pagos():
-    msg = ""
+    # Importaciones necesarias
+    from flask import Response, stream_with_context
     import re
     import pandas as pd
     import traceback
@@ -1420,30 +1420,45 @@ def medios_pagos():
     from datetime import datetime, timedelta
     from openpyxl import load_workbook
 
-    # 1. FECHA SELECCIONADA
-    fecha_url = request.args.get('fecha')
-    if fecha_url:
-        fecha_filtro = fecha_url
-    else:
-        fecha_filtro = datetime.now().strftime('%Y-%m-%d')
+    # 1. SI ES GET (Mostrar la página normal)
+    if request.method == 'GET':
+        fecha_url = request.args.get('fecha')
+        fecha_filtro = fecha_url if fecha_url else datetime.now().strftime('%Y-%m-%d')
 
-    # 2. PROCESAR ARCHIVO
-    if request.method == 'POST':
-        if 'archivo' not in request.files:
-            return render_template('medios_pagos.html', msg="Falta archivo", fecha=fecha_filtro, datos={})
+        # Cargar datos para mostrar en la tabla
+        pagos_db = PagoElectronico.query.filter_by(user_id=current_user.id, fecha=fecha_filtro).all()
         
+        datos_agrupados = {}
+        for p in pagos_db:
+            vend = p.vendedor or "Sin Asignar"
+            turno = "Noche"
+            try:
+                h = int(p.hora.split(':')[0])
+                if 6 <= h < 14: turno = "Mañana"
+                elif 14 <= h < 22: turno = "Tarde"
+            except: pass
+            
+            if vend not in datos_agrupados: datos_agrupados[vend] = {"Mañana": [], "Tarde": [], "Noche": []}
+            datos_agrupados[vend][turno].append(p)
+
+        return render_template('medios_pagos.html', fecha=fecha_filtro, datos=datos_agrupados)
+
+    # 2. SI ES POST (Procesar archivo con Barra de Carga)
+    # Usamos stream_with_context para enviar actualizaciones en vivo
+    def generate_processing():
         archivo = request.files['archivo']
-        if not archivo.filename:
-            return render_template('medios_pagos.html', msg="Archivo vacío", fecha=fecha_filtro, datos={})
+        if not archivo or not archivo.filename:
+            yield '<script>parent.errorCarga("Archivo vacío");</script>'
+            return
 
         try:
-            print(f"📂 Procesando archivo: {archivo.filename}")
+            # Avisar que estamos leyendo
+            yield '<script>parent.updateStatus("Leyendo archivo...", 5);</script>'
             
             # --- LECTURA DE ARCHIVO ---
             df = None
             filename = archivo.filename.lower()
             
-            # Intento de lectura universal (CSV con ; o , o Excel)
             if filename.endswith('.csv'):
                 try:
                     archivo.seek(0)
@@ -1467,183 +1482,133 @@ def medios_pagos():
                         df.columns = df.iloc[0]
                         df = df.iloc[1:].reset_index(drop=True)
                 except Exception as e:
-                    msg = f"❌ Error Excel: {str(e)}"
+                    yield f'<script>parent.errorCarga("Error Excel: {str(e)}");</script>'
+                    return
 
-            if df is not None:
-                # Normalizar columnas
-                df.columns = [str(c).strip().lower() for c in df.columns]
-                cols = list(df.columns)
-                count = 0
-                cruce_exitoso = 0
-                
-                col_mp_id = next((c for c in cols if "operation_id" in c or "operación" in c), None)
-                col_ypf_motor = next((c for c in cols if "motor de pago" in c), None)
+            if df is None:
+                yield '<script>parent.errorCarga("Formato no reconocido");</script>'
+                return
 
-                # =================================================
-                # BLOQUE MERCADO PAGO
-                # =================================================
-                if col_mp_id and not col_ypf_motor:
-                    print("🔵 Detectado: MERCADO PAGO")
-                    
-                    col_fecha = next((c for c in cols if "date_created" in c or "fecha" in c), None)
-                    col_caja = next((c for c in cols if "external_id" in c or "caja externo" in c), None)
-                    col_monto = next((c for c in cols if "transaction_amount" in c or "valor del producto" in c or "importe" in c), None)
+            # --- PREPARACIÓN ---
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            cols = list(df.columns)
+            total_filas = len(df)
+            
+            if total_filas == 0:
+                yield '<script>parent.finalizarCarga("El archivo está vacío");</script>'
+                return
 
-                    if col_caja and col_monto:
-                        for i, row in df.iterrows():
-                            try:
-                                # A. EXTRAER SURTIDOR ("s739y5" -> buscamos el 5)
-                                caja_str = str(row.get(col_caja, '')).strip().lower()
-                                nums = re.findall(r'\d+', caja_str)
-                                
-                                surtidor_raw = 0
-                                # Buscamos el último número válido entre 1 y 99
-                                # Esto evita tomar el '739' de la estación
-                                for n in reversed(nums): # Reversed para priorizar el último (y5)
-                                    val = int(n)
-                                    if 1 <= val <= 99:
-                                        surtidor_raw = val
-                                        break 
-                                
-                                if surtidor_raw == 0: continue
+            yield f'<script>parent.updateStatus("Iniciando procesamiento de {total_filas} registros...", 10);</script>'
 
-                                # B. FECHA
-                                f_raw = str(row.get(col_fecha, ''))
-                                try: dt_obj = pd.to_datetime(f_raw, dayfirst=True)
-                                except: dt_obj = pd.to_datetime(f_raw.replace('"', '').split('.')[0], dayfirst=True)
-                                
-                                fecha_str = dt_obj.strftime('%Y-%m-%d')
-                                hora_str = dt_obj.strftime('%H:%M:%S')
+            col_mp_id = next((c for c in cols if "operation_id" in c or "operación" in c), None)
+            col_ypf_motor = next((c for c in cols if "motor de pago" in c), None)
+            
+            count = 0
+            
+            # =========================================================
+            # PROCESAMIENTO FILA POR FILA (Aquí actualizamos la barra)
+            # =========================================================
+            
+            # BLOQUE MERCADO PAGO
+            if col_mp_id and not col_ypf_motor:
+                col_fecha = next((c for c in cols if "date_created" in c or "fecha" in c), None)
+                col_caja = next((c for c in cols if "external_id" in c or "caja externo" in c), None)
+                col_monto = next((c for c in cols if "transaction_amount" in c or "valor del producto" in c or "importe" in c), None)
 
-                                # C. MONTO
-                                monto = float(str(row.get(col_monto, 0)).replace(',', '.'))
+                for i, row in df.iterrows():
+                    try:
+                        # --- Lógica MP ---
+                        caja_str = str(row.get(col_caja, '')).strip().lower()
+                        nums = re.findall(r'\d+', caja_str)
+                        surtidor_raw = 0
+                        for n in reversed(nums):
+                            if 1 <= int(n) <= 99: surtidor_raw = int(n); break 
+                        if surtidor_raw == 0: continue
 
-                                # D. === CRUCE DIRECTO (MONTO + SURTIDOR) ===
-                                vendedor_encontrado = "Sin Asignar"
-                                producto_encontrado = ""
-                                
-                                # Traemos ventas de ese día y surtidor
-                                ventas_posibles = VentaVendedor.query.filter_by(
-                                    user_id=current_user.id,
-                                    fecha=fecha_str,
-                                    surtidor=surtidor_raw
-                                ).all()
-                                
-                                # Convertimos hora MP a segundos para desempatar si hiciera falta
-                                t_mp = dt_obj.time()
-                                seg_mp = t_mp.hour * 3600 + t_mp.minute * 60 + t_mp.second
-                                
-                                mejor_diff_tiempo = 999999
-                                candidato = None
-                                
-                                for v in ventas_posibles:
-                                    try:
-                                        # 1. COINCIDENCIA DE MONTO (Prioridad TOTAL)
-                                        # Tolerancia mínima ($1 peso) por redondeos
-                                        if abs(v.monto - monto) <= 1.5:
-                                            
-                                            # 2. VERIFICACIÓN DE TIEMPO (Solo para asegurar que no sea de otro turno)
-                                            # Tolerancia: 600 segundos (10 minutos)
-                                            hv = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
-                                            seg_venta = hv.hour * 3600 + hv.minute * 60 + hv.second
-                                            diff = abs(seg_venta - seg_mp)
-                                            
-                                            if diff < 600: # 10 minutos max
-                                                if diff < mejor_diff_tiempo:
-                                                    mejor_diff_tiempo = diff
-                                                    candidato = v
-                                    except: pass
-                                
-                                if candidato:
-                                    vendedor_encontrado = candidato.vendedor
-                                    producto_encontrado = candidato.combustible
-                                    cruce_exitoso += 1
+                        f_raw = str(row.get(col_fecha, ''))
+                        try: dt_obj = pd.to_datetime(f_raw, dayfirst=True)
+                        except: dt_obj = pd.to_datetime(f_raw.replace('"', '').split('.')[0], dayfirst=True)
+                        fecha_str = dt_obj.strftime('%Y-%m-%d')
+                        hora_str = dt_obj.strftime('%H:%M:%S')
+                        monto = float(str(row.get(col_monto, 0)).replace(',', '.'))
 
-                                # E. GUARDAR
-                                nuevo = PagoElectronico(
-                                    user_id=current_user.id, origen='MERCADO PAGO',
-                                    fecha=fecha_str, hora=hora_str, surtidor=surtidor_raw,
-                                    monto=monto, vendedor=vendedor_encontrado, 
-                                    area='Playa', producto=producto_encontrado
-                                )
-                                db.session.add(nuevo)
-                                count += 1
-                            except: continue
+                        # Cruce
+                        vend_enc = "Sin Asignar"; prod_enc = ""
+                        ventas = VentaVendedor.query.filter_by(user_id=current_user.id, fecha=fecha_str, surtidor=surtidor_raw).all()
+                        t_mp = dt_obj.time(); seg_mp = t_mp.hour*3600 + t_mp.minute*60 + t_mp.second
+                        best_diff = 999999; cand = None
                         
-                        msg = f"✅ Procesados {count} MP. Cruzados: {cruce_exitoso}."
+                        for v in ventas:
+                            if abs(v.monto - monto) <= 1.5:
+                                hv = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
+                                seg_v = hv.hour*3600 + hv.minute*60 + hv.second
+                                diff = abs(seg_v - seg_mp)
+                                if diff < 600 and diff < best_diff:
+                                    best_diff = diff; cand = v
+                        
+                        if cand: vend_enc = cand.vendedor; prod_enc = cand.combustible
 
-                # =================================================
-                # BLOQUE APP YPF
-                # =================================================
-                elif col_ypf_motor or any("redenciones" in c for c in cols):
-                    def limpiar_ypf(v):
-                        try:
-                            txt = str(v).strip().split('$')[1] if '$' in str(v) else str(v)
-                            m = re.search(r'[\d\.,]+', txt)
-                            if m:
-                                ns = m.group(0).replace('.', '').replace(',', '.') if '.' in m.group(0) and ',' in m.group(0) else m.group(0).replace(',', '.')
-                                return float(ns)
-                            return float(txt)
-                        except: return 0.0
+                        nuevo = PagoElectronico(user_id=current_user.id, origen='MERCADO PAGO', fecha=fecha_str, hora=hora_str, surtidor=surtidor_raw, monto=monto, vendedor=vend_enc, area='Playa', producto=prod_enc)
+                        db.session.add(nuevo)
+                        count += 1
+                    except: pass
+                    
+                    # ACTUALIZAR BARRA CADA 5 FILAS (Para no saturar)
+                    if i % 5 == 0 or i == total_filas - 1:
+                        porcentaje = int((i / total_filas) * 100)
+                        # Enviamos script JS al navegador
+                        yield f'<script>parent.updateBar({porcentaje}, {count});</script>'
 
-                    col_fecha = next((c for c in cols if c == "fecha"), None)
-                    col_hora = next((c for c in cols if c == "hora"), None)
-                    col_pto = next((c for c in cols if "punto de venta" in c), None)
-                    col_imp = next((c for c in cols if "importe" == c or "importe total" in c), None)
-                    col_vend = next((c for c in cols if "nombre del vendedor" in c), None)
-                    col_prod = next((c for c in cols if c == "productos"), None)
+            # BLOQUE APP YPF
+            elif col_ypf_motor or any("redenciones" in c for c in cols):
+                col_fecha = next((c for c in cols if c == "fecha"), None)
+                col_hora = next((c for c in cols if c == "hora"), None)
+                col_pto = next((c for c in cols if "punto de venta" in c), None)
+                col_imp = next((c for c in cols if "importe" == c or "importe total" in c), None)
+                col_vend = next((c for c in cols if "nombre del vendedor" in c), None)
+                col_prod = next((c for c in cols if c == "productos"), None)
 
-                    for i, row in df.iterrows():
-                        try:
-                            nums = re.findall(r'\d+', str(row.get(col_pto, '')))
-                            if not nums: continue
-                            surt = int(nums[-1])
-                            if surt == 101: continue
+                for i, row in df.iterrows():
+                    try:
+                        # --- Lógica YPF ---
+                        nums = re.findall(r'\d+', str(row.get(col_pto, '')))
+                        if not nums: continue
+                        surt = int(nums[-1])
+                        if surt == 101: continue
+                        
+                        f_str = str(row.get(col_fecha, '')).split(" ")[0]
+                        h_str = str(row.get(col_hora, ''))
+                        vend = str(row.get(col_vend, ''))
+                        prod = str(row.get(col_prod, ''))
+                        
+                        val_txt = str(row.get(col_imp, 0)).strip().split('$')[1] if '$' in str(row.get(col_imp, 0)) else str(row.get(col_imp, 0))
+                        m_obj = re.search(r'[\d\.,]+', val_txt)
+                        if m_obj:
+                            ns = m_obj.group(0).replace('.', '').replace(',', '.') if '.' in m_obj.group(0) and ',' in m_obj.group(0) else m_obj.group(0).replace(',', '.')
+                            monto = float(ns)
+                        else: monto = 0.0
 
-                            f_str = str(row.get(col_fecha, '')).split(" ")[0]
-                            h_str = str(row.get(col_hora, ''))
-                            vend = str(row.get(col_vend, ''))
-                            prod = str(row.get(col_prod, ''))
-                            monto = limpiar_ypf(row.get(col_imp, 0))
+                        nuevo = PagoElectronico(user_id=current_user.id, origen='APP YPF', fecha=f_str, hora=h_str, surtidor=surt, monto=monto, vendedor=vend, area='Playa', producto=prod)
+                        db.session.add(nuevo)
+                        count += 1
+                    except: pass
 
-                            nuevo = PagoElectronico(
-                                user_id=current_user.id, origen='APP YPF',
-                                fecha=f_str, hora=h_str, surtidor=surt,
-                                monto=monto, vendedor=vend, area='Playa', producto=prod
-                            )
-                            db.session.add(nuevo)
-                            count += 1
-                        except: continue
-                    msg = f"✅ Procesados {count} App YPF."
-                
-                else:
-                    msg = "⚠️ Formato no reconocido."
+                    if i % 5 == 0 or i == total_filas - 1:
+                        porcentaje = int((i / total_filas) * 100)
+                        yield f'<script>parent.updateBar({porcentaje}, {count});</script>'
 
-                db.session.commit()
+            # Guardar todo
+            db.session.commit()
+            
+            # Finalizar
+            msg_final = f"Proceso completado. Registros cargados: {count}"
+            yield f'<script>parent.finalizarCarga("{msg_final}");</script>'
 
         except Exception as e:
             traceback.print_exc()
-            msg = f"❌ Error: {str(e)}"
-    
-    # 3. FILTRAR Y AGRUPAR (Igual que Ventas Vendedor)
-    pagos_db = PagoElectronico.query.filter_by(user_id=current_user.id, fecha=fecha_filtro).all()
+            yield f'<script>parent.errorCarga("Error Crítico: {str(e)}");</script>'
 
-    datos_agrupados = {}
-    for p in pagos_db:
-        vend = p.vendedor or "Sin Asignar"
-        
-        # Calcular Turno
-        turno = "Noche"
-        try:
-            h = int(p.hora.split(':')[0])
-            if 6 <= h < 14: turno = "Mañana"
-            elif 14 <= h < 22: turno = "Tarde"
-        except: pass
-
-        if vend not in datos_agrupados:
-            datos_agrupados[vend] = {"Mañana": [], "Tarde": [], "Noche": []}
-        datos_agrupados[vend][turno].append(p)
-
-    return render_template('medios_pagos.html', msg=msg, fecha=fecha_filtro, datos=datos_agrupados)
+    # Retornamos la respuesta como STREAM (flujo de datos)
+    return Response(stream_with_context(generate_processing()))
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)
