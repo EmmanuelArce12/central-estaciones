@@ -1628,4 +1628,5 @@ def medios_pagos():
         datos_agrupados[vend][turno].append(p)
 
     return render_template('medios_pagos.html', msg=msg, fecha=fecha_filtro, datos=datos_agrupados)
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)
