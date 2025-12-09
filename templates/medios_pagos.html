@@ -3,60 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medios de Pago Electrónicos</title>
+    <title>Medios de Pago</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; max-width: 1100px; margin: 0 auto; }
         
-        /* HEADER IGUAL A VENTAS */
+        /* HEADER Y CONTROLES */
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
-        h1 { color: #2c3e50; margin: 0; font-size: 1.8rem; }
+        .controls { display: flex; gap: 15px; align-items: center; background: white; padding: 10px 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .date-input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
         
-        .btn-back { 
-            text-decoration: none; color: #555; font-weight: bold; 
-            border: 1px solid #ccc; padding: 8px 15px; border-radius: 5px; 
-            background: white; transition: 0.2s; font-size: 0.9rem;
+        .btn-back { text-decoration: none; color: #555; padding: 8px 15px; border: 1px solid #ccc; border-radius: 5px; background: white; }
+        .btn-upload { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; }
+        
+        /* ACORDEÓN */
+        .accordion { margin-top: 20px; }
+        .acc-item { background: white; border-radius: 8px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .acc-header { 
+            padding: 15px 20px; background: white; cursor: pointer; display: flex; justify-content: space-between; 
+            align-items: center; border-left: 5px solid #ccc; transition: 0.2s;
         }
-        .btn-back:hover { background: #e9ecef; }
-
-        /* GRID LAYOUT (Columna izq datos, Columna der carga) */
-        .main-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; }
-        @media (max-width: 768px) { .main-grid { grid-template-columns: 1fr; } }
-
-        /* CARDS / CONTENEDORES */
-        .card { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 20px; border: 1px solid #eee; }
+        .acc-header:hover { background-color: #f8f9fa; }
+        .acc-header.active { background-color: #e9ecef; }
+        .acc-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background: #fafafa; }
         
-        /* FORMULARIO DE CARGA */
-        .upload-area { text-align: center; border: 2px dashed #dde1e6; border-radius: 8px; padding: 30px 15px; background: #fafbfc; }
-        .upload-area:hover { border-color: #007bff; background: #f0f8ff; }
-        .btn-upload { 
-            background: #007bff; color: white; border: none; padding: 10px 20px; 
-            border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 15px; width: 100%;
-        }
-        .btn-upload:hover { background: #0056b3; }
-
-        /* MENSAJES FLASH */
-        .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: 500; font-size: 0.95rem; }
-        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-        .alert-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-
-        /* TABLA DE DATOS */
-        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 10px; }
-        th { text-align: left; padding: 12px; background-color: #f8f9fa; color: #666; font-weight: 600; border-bottom: 2px solid #e9ecef; }
-        td { padding: 12px; border-bottom: 1px solid #eee; color: #444; vertical-align: middle; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover td { background-color: #fcfcfc; }
-
-        /* BADGES / ETIQUETAS */
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
-        .badge-mp { background-color: #e6f7ff; color: #009ee3; border: 1px solid #b3e0ff; }
-        .badge-ypf { background-color: #fff0f6; color: #e0004d; border: 1px solid #ffadd2; }
-
-        .price { font-weight: 600; color: #2c3e50; }
-        .vendedor-name { font-weight: 500; color: #333; }
-        .empty-state { text-align: center; color: #999; padding: 40px; font-style: italic; }
+        /* TABLAS INTERNAS */
+        .turno-block { padding: 15px; border-bottom: 1px solid #eee; }
+        .turno-title { font-weight: bold; color: #555; margin-bottom: 10px; font-size: 0.9rem; text-transform: uppercase; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; background: white; }
+        th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #f1f3f5; }
         
-        .section-title { font-size: 1.1rem; color: #333; margin-bottom: 15px; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; }
+        .badge-mp { background: #e6f7ff; color: #009ee3; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+        .badge-ypf { background: #fff0f6; color: #e0004d; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+        .total-row { font-weight: bold; background: #f8fff0; }
     </style>
 </head>
 <body>
@@ -65,95 +44,109 @@
         <div style="display:flex; align-items:center; gap:15px;">
             <div style="font-size: 2rem;">📱</div>
             <div>
-                <h1>Medios de Pago</h1>
-                <div style="color:#777; font-size:0.9rem;">Gestión de Mercado Pago y App YPF</div>
+                <h1 style="margin:0;">Medios de Pago</h1>
+                <div style="color:#777; font-size:0.9rem;">Control y Cruce de Pagos</div>
             </div>
         </div>
-        <a href="{{ url_for('panel_estacion') }}" class="btn-back">← Volver al Panel</a>
+        <a href="{{ url_for('panel_estacion') }}" class="btn-back">← Volver</a>
+    </div>
+
+    <div class="controls">
+        <label>Fecha:</label>
+        <input type="date" id="fechaSelector" class="date-input" value="{{ fecha }}">
+        
+        <div style="flex-grow:1;"></div>
+        
+        <form method="POST" enctype="multipart/form-data" style="display:flex; align-items:center; gap:10px;">
+            <input type="file" name="archivo" accept=".csv, .xlsx" required style="font-size:0.9rem;">
+            <button type="submit" class="btn-upload">Procesar Archivo</button>
+        </form>
     </div>
 
     {% if msg %}
-        <div class="alert alert-info">{{ msg }}</div>
+        <div style="padding:15px; margin-top:20px; background:#d1ecf1; color:#0c5460; border-radius:5px;">{{ msg }}</div>
     {% endif %}
 
-    <div class="main-grid">
-        
-        <div class="card">
-            <h3 class="section-title">Últimos Registros Procesados</h3>
-            
-            {% if pagos %}
-            <div style="overflow-x: auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th width="15%">Origen</th>
-                            <th>Fecha/Hora</th>
-                            <th>Surt.</th>
-                            <th>Vendedor</th>
-                            <th>Monto</th>
-                            <th>Detalle</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for p in pagos %}
-                        <tr>
-                            <td>
-                                {% if p.origen == 'MERCADO PAGO' %}
-                                    <span class="badge badge-mp">MERCADO PAGO</span>
-                                {% else %}
-                                    <span class="badge badge-ypf">APP YPF</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <div>{{ p.fecha }}</div>
-                                <div style="font-size:0.8rem; color:#888;">{{ p.hora }}</div>
-                            </td>
-                            <td style="text-align:center; font-weight:bold; color:#555;">{{ p.surtidor }}</td>
-                            <td>
-                                <span class="vendedor-name">{{ p.vendedor or 'Desconocido' }}</span>
-                            </td>
-                            <td class="price">${{ "{:,.2f}".format(p.monto) }}</td>
-                            <td style="font-size:0.85rem; color:#666;">
-                                {% if p.origen == 'APP YPF' %}
-                                    {{ p.producto }}
-                                    {% if p.descuento > 0 %} <br><span style="color:#28a745; font-size:0.75rem;">Desc: -${{p.descuento}}</span> {% endif %}
-                                {% else %}
-                                    -
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-                <div class="empty-state">
-                    No hay registros de pagos electrónicos cargados recientemente.
+    <div class="accordion">
+        {% for vendedor, turnos in datos.items() %}
+            {% set total_vend = 0 %}
+            {% for t, lista in turnos.items() %}
+                {% for p in lista %}{% set total_vend = total_vend + p.monto %}{% endfor %}
+            {% endfor %}
+
+            <div class="acc-item">
+                <div class="acc-header" onclick="toggleAcc(this)">
+                    <div>
+                        <strong>{{ vendedor }}</strong>
+                    </div>
+                    <div>
+                        <span style="font-size:1.1rem; font-weight:bold;">${{ "{:,.2f}".format(total_vend) }}</span>
+                        <span style="font-size:0.8rem; color:#888;">▼</span>
+                    </div>
                 </div>
-            {% endif %}
-        </div>
-
-        <div class="card" style="height: fit-content;">
-            <h3 class="section-title">Cargar Archivo</h3>
-            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
-                Sube el reporte de <strong>Collection (MP)</strong> o <strong>Transacciones (App YPF)</strong>.
-            </p>
-            
-            <form method="POST" enctype="multipart/form-data">
-                <div class="upload-area">
-                    <div style="font-size:2rem; margin-bottom:10px;">📂</div>
-                    <input type="file" name="archivo" accept=".csv, .xlsx, .xls" required style="max-width: 100%; font-size: 0.85rem;">
+                <div class="acc-content">
+                    {% for nombre_turno, pagos in turnos.items() %}
+                        {% if pagos %}
+                        <div class="turno-block">
+                            <div class="turno-title">Turno {{ nombre_turno }}</div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th width="80">Hora</th>
+                                        <th width="80">Origen</th>
+                                        <th width="50">Surt.</th>
+                                        <th>Detalle / Producto</th>
+                                        <th width="100" style="text-align:right;">Monto</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for p in pagos %}
+                                    <tr>
+                                        <td>{{ p.hora }}</td>
+                                        <td>
+                                            {% if p.origen == 'MERCADO PAGO' %}
+                                                <span class="badge-mp">MP</span>
+                                            {% else %}
+                                                <span class="badge-ypf">YPF</span>
+                                            {% endif %}
+                                        </td>
+                                        <td style="text-align:center;">{{ p.surtidor }}</td>
+                                        <td>{{ p.producto or '-' }}</td>
+                                        <td style="text-align:right;">${{ "{:,.2f}".format(p.monto) }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
                 </div>
-                <button type="submit" class="btn-upload">Procesar Datos</button>
-            </form>
-
-            <div style="margin-top: 20px; font-size: 0.85rem; color: #888; background: #f9f9f9; padding: 10px; border-radius: 5px;">
-                <strong>💡 Nota:</strong><br>
-                Asegúrate de haber cargado primero las <em>Ventas por Vendedor</em> del día correspondiente para que el sistema pueda asignar el vendedor correcto a los pagos de Mercado Pago.
             </div>
-        </div>
-
+        {% else %}
+            <div style="text-align:center; padding:40px; color:#999;">
+                No hay pagos registrados para la fecha {{ fecha }}.
+            </div>
+        {% endfor %}
     </div>
 
+    <script>
+        // Recargar al cambiar fecha
+        document.getElementById('fechaSelector').addEventListener('change', (e) => {
+            if (e.target.value) {
+                window.location.href = `?fecha=${e.target.value}`;
+            }
+        });
+
+        // Acordeón
+        function toggleAcc(header) {
+            header.classList.toggle('active');
+            var content = header.nextElementSibling;
+            if (content.style.maxHeight) {
+                content.style.maxHeight = null;
+            } else {
+                content.style.maxHeight = content.scrollHeight + "px";
+            }
+        }
+    </script>
 </body>
 </html>
