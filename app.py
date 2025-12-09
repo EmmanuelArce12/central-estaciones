@@ -1441,21 +1441,28 @@ def medios_pagos():
                 except:
                     archivo.seek(0)
                     df = pd.read_csv(archivo, encoding='latin1', sep=None, engine='python')
+            
             else:
+                import io
+
                 try:
-                    # ✅ LECTURA SEGURA PARA ARCHIVOS DE MERCADO PAGO CON ESTILOS ROTOS
+                    # ✅ LECTURA SEGURA PARA EXCEL DE MERCADO PAGO (ESTILOS ROTOS)
                     archivo_bytes = archivo.read()
                     archivo.seek(0)
-                    
+
                     df = pd.read_excel(
                         io.BytesIO(archivo_bytes),
                         engine="openpyxl",
-                        dtype=str
+                        dtype=str,
+                        sheet_name=0
                     )
+
                 except Exception as e:
-                    print("❌ Falló openpyxl, intento con xlrd...")
-                    archivo.seek(0)
-                    df = pd.read_excel(archivo, engine="xlrd", dtype=str)
+                    print("❌ Error real leyendo Excel:", str(e))
+                    traceback.print_exc()
+                    msg = f"❌ Error Crítico al leer el Excel: {str(e)}"
+                    return render_template('medios_pagos.html', msg=msg)
+
 
 
             # Normalizamos nombres de columnas (minusculas y sin espacios extra)
