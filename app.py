@@ -1420,14 +1420,14 @@ def medios_pagos():
     from datetime import datetime, timedelta
     from openpyxl import load_workbook
 
-    # 1. OBTENER FECHA SELECCIONADA
+    # 1. FECHA SELECCIONADA
     fecha_url = request.args.get('fecha')
     if fecha_url:
         fecha_filtro = fecha_url
     else:
         fecha_filtro = datetime.now().strftime('%Y-%m-%d')
 
-    # 2. PROCESAR ARCHIVO (POST)
+    # 2. PROCESAR ARCHIVO
     if request.method == 'POST':
         if 'archivo' not in request.files:
             return render_template('medios_pagos.html', msg="Falta archivo", fecha=fecha_filtro, datos={})
@@ -1437,13 +1437,13 @@ def medios_pagos():
             return render_template('medios_pagos.html', msg="Archivo vacío", fecha=fecha_filtro, datos={})
 
         try:
-            print(f"📂 Procesando archivo MP/YPF: {archivo.filename}")
+            print(f"📂 Procesando archivo: {archivo.filename}")
             
-            # --- LECTURA UNIVERSAL ---
+            # --- LECTURA DE ARCHIVO ---
             df = None
             filename = archivo.filename.lower()
             
-            # A) CSV (Mercado Pago)
+            # Intento de lectura universal (CSV con ; o , o Excel)
             if filename.endswith('.csv'):
                 try:
                     archivo.seek(0)
@@ -1456,8 +1456,6 @@ def medios_pagos():
                     except:
                         archivo.seek(0)
                         df = pd.read_csv(archivo, sep=None, encoding='latin1', engine='python')
-
-            # B) EXCEL (App YPF)
             else:
                 try:
                     archivo_bytes = archivo.read()
@@ -1476,13 +1474,17 @@ def medios_pagos():
                 df.columns = [str(c).strip().lower() for c in df.columns]
                 cols = list(df.columns)
                 count = 0
+                cruce_exitoso = 0
                 
-                # Detectar tipo
                 col_mp_id = next((c for c in cols if "operation_id" in c or "operación" in c), None)
                 col_ypf_motor = next((c for c in cols if "motor de pago" in c), None)
 
-                # --- BLOQUE MERCADO PAGO ---
+                # =================================================
+                # BLOQUE MERCADO PAGO
+                # =================================================
                 if col_mp_id and not col_ypf_motor:
+                    print("🔵 Detectado: MERCADO PAGO")
+                    
                     col_fecha = next((c for c in cols if "date_created" in c or "fecha" in c), None)
                     col_caja = next((c for c in cols if "external_id" in c or "caja externo" in c), None)
                     col_monto = next((c for c in cols if "transaction_amount" in c or "valor del producto" in c or "importe" in c), None)
@@ -1490,16 +1492,22 @@ def medios_pagos():
                     if col_caja and col_monto:
                         for i, row in df.iterrows():
                             try:
-                                # Surtidor
+                                # A. EXTRAER SURTIDOR ("s739y5" -> buscamos el 5)
                                 caja_str = str(row.get(col_caja, '')).strip().lower()
                                 nums = re.findall(r'\d+', caja_str)
+                                
                                 surtidor_raw = 0
-                                for n in nums:
-                                    if 1 <= int(n) <= 99:
-                                        surtidor_raw = int(n); break
+                                # Buscamos el último número válido entre 1 y 99
+                                # Esto evita tomar el '739' de la estación
+                                for n in reversed(nums): # Reversed para priorizar el último (y5)
+                                    val = int(n)
+                                    if 1 <= val <= 99:
+                                        surtidor_raw = val
+                                        break 
+                                
                                 if surtidor_raw == 0: continue
 
-                                # Fecha
+                                # B. FECHA
                                 f_raw = str(row.get(col_fecha, ''))
                                 try: dt_obj = pd.to_datetime(f_raw, dayfirst=True)
                                 except: dt_obj = pd.to_datetime(f_raw.replace('"', '').split('.')[0], dayfirst=True)
@@ -1507,49 +1515,66 @@ def medios_pagos():
                                 fecha_str = dt_obj.strftime('%Y-%m-%d')
                                 hora_str = dt_obj.strftime('%H:%M:%S')
 
-                                # Monto
+                                # C. MONTO
                                 monto = float(str(row.get(col_monto, 0)).replace(',', '.'))
 
-                                # === CRUCE INTELIGENTE ===
+                                # D. === CRUCE DIRECTO (MONTO + SURTIDOR) ===
                                 vendedor_encontrado = "Sin Asignar"
+                                producto_encontrado = ""
                                 
-                                # Buscamos ventas del mismo día y surtidor
+                                # Traemos ventas de ese día y surtidor
                                 ventas_posibles = VentaVendedor.query.filter_by(
                                     user_id=current_user.id,
                                     fecha=fecha_str,
                                     surtidor=surtidor_raw
                                 ).all()
                                 
-                                t_pago = dt_obj.time()
-                                pago_seg = t_pago.hour * 3600 + t_pago.minute * 60 + t_pago.second
-                                mejor_diff = 3600 # 1 hora tolerancia
+                                # Convertimos hora MP a segundos para desempatar si hiciera falta
+                                t_mp = dt_obj.time()
+                                seg_mp = t_mp.hour * 3600 + t_mp.minute * 60 + t_mp.second
+                                
+                                mejor_diff_tiempo = 999999
+                                candidato = None
                                 
                                 for v in ventas_posibles:
                                     try:
-                                        # 1. Comparar Monto (Tolerancia $10)
-                                        if abs(v.monto - monto) <= 10.0:
-                                            # 2. Si el monto coincide, verificamos hora
-                                            hv = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
-                                            venta_seg = hv.hour * 3600 + hv.minute * 60 + hv.second
-                                            diff = abs(venta_seg - pago_seg)
+                                        # 1. COINCIDENCIA DE MONTO (Prioridad TOTAL)
+                                        # Tolerancia mínima ($1 peso) por redondeos
+                                        if abs(v.monto - monto) <= 1.5:
                                             
-                                            if diff < mejor_diff:
-                                                mejor_diff = diff
-                                                vendedor_encontrado = v.vendedor
+                                            # 2. VERIFICACIÓN DE TIEMPO (Solo para asegurar que no sea de otro turno)
+                                            # Tolerancia: 600 segundos (10 minutos)
+                                            hv = datetime.strptime(v.primer_horario, '%H:%M:%S').time()
+                                            seg_venta = hv.hour * 3600 + hv.minute * 60 + hv.second
+                                            diff = abs(seg_venta - seg_mp)
+                                            
+                                            if diff < 600: # 10 minutos max
+                                                if diff < mejor_diff_tiempo:
+                                                    mejor_diff_tiempo = diff
+                                                    candidato = v
                                     except: pass
                                 
-                                # Guardar
+                                if candidato:
+                                    vendedor_encontrado = candidato.vendedor
+                                    producto_encontrado = candidato.combustible
+                                    cruce_exitoso += 1
+
+                                # E. GUARDAR
                                 nuevo = PagoElectronico(
                                     user_id=current_user.id, origen='MERCADO PAGO',
                                     fecha=fecha_str, hora=hora_str, surtidor=surtidor_raw,
-                                    monto=monto, vendedor=vendedor_encontrado, area='Playa'
+                                    monto=monto, vendedor=vendedor_encontrado, 
+                                    area='Playa', producto=producto_encontrado
                                 )
                                 db.session.add(nuevo)
                                 count += 1
                             except: continue
-                        msg = f"✅ Procesados {count} Mercado Pago."
+                        
+                        msg = f"✅ Procesados {count} MP. Cruzados: {cruce_exitoso}."
 
-                # --- BLOQUE APP YPF ---
+                # =================================================
+                # BLOQUE APP YPF
+                # =================================================
                 elif col_ypf_motor or any("redenciones" in c for c in cols):
                     def limpiar_ypf(v):
                         try:
@@ -1570,13 +1595,11 @@ def medios_pagos():
 
                     for i, row in df.iterrows():
                         try:
-                            # Surtidor
                             nums = re.findall(r'\d+', str(row.get(col_pto, '')))
                             if not nums: continue
                             surt = int(nums[-1])
                             if surt == 101: continue
 
-                            # Datos
                             f_str = str(row.get(col_fecha, '')).split(" ")[0]
                             h_str = str(row.get(col_hora, ''))
                             vend = str(row.get(col_vend, ''))
@@ -1602,15 +1625,10 @@ def medios_pagos():
             traceback.print_exc()
             msg = f"❌ Error: {str(e)}"
     
-    # 3. FILTRAR Y AGRUPAR POR FECHA, VENDEDOR Y TURNO
-    pagos_db = PagoElectronico.query.filter_by(
-        user_id=current_user.id, 
-        fecha=fecha_filtro
-    ).all()
+    # 3. FILTRAR Y AGRUPAR (Igual que Ventas Vendedor)
+    pagos_db = PagoElectronico.query.filter_by(user_id=current_user.id, fecha=fecha_filtro).all()
 
-    # Estructura: { "Vendedor": { "Mañana": [pago, pago], "Tarde": [], "Noche": [] } }
     datos_agrupados = {}
-
     for p in pagos_db:
         vend = p.vendedor or "Sin Asignar"
         
@@ -1624,7 +1642,6 @@ def medios_pagos():
 
         if vend not in datos_agrupados:
             datos_agrupados[vend] = {"Mañana": [], "Tarde": [], "Noche": []}
-        
         datos_agrupados[vend][turno].append(p)
 
     return render_template('medios_pagos.html', msg=msg, fecha=fecha_filtro, datos=datos_agrupados)
