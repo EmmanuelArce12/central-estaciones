@@ -14,10 +14,11 @@
         /* BOTONES */
         .btn-back { text-decoration: none; color: #555; padding: 8px 15px; border: 1px solid #ccc; border-radius: 5px; background: white; }
         
+        /* Botón Azul (Procesar) */
         .btn-upload { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
         .btn-upload:disabled { background: #ccc; cursor: not-allowed; }
         
-        /* BOTÓN DETENER (ROJO FUERTE) */
+        /* Botón Rojo (Detener) - Oculto por defecto */
         .btn-stop { background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; display: none; }
         .btn-stop:hover { background: #c82333; }
 
@@ -74,10 +75,10 @@
         
         <div style="flex-grow:1;"></div>
 
-        <form id="uploadForm" method="POST" enctype="multipart/form-data" target="hidden_iframe" style="display:flex; align-items:center; gap:10px;">
+        <form id="uploadForm" action="{{ url_for('medios_pagos') }}" method="POST" enctype="multipart/form-data" target="hidden_iframe" style="display:flex; align-items:center; gap:10px;">
             <input type="file" name="archivo" accept=".csv, .xlsx" required style="font-size:0.9rem;">
             
-            <button type="submit" class="btn-upload" id="btnUpload" onclick="iniciarCarga()">
+            <button type="button" class="btn-upload" id="btnUpload" onclick="iniciarCarga()">
                 ▶ Procesar Archivo
             </button>
             
@@ -151,34 +152,36 @@
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progressBar');
         const statusText = document.getElementById('status-text');
+        const form = document.getElementById('uploadForm');
         const iframe = document.getElementById('hidden_iframe');
 
         function iniciarCarga() {
+            // 1. Validar que haya archivo
             const fileInput = document.querySelector('input[name="archivo"]');
             if(!fileInput.files.length) {
-                alert("Selecciona un archivo primero.");
-                // Retornamos false para prevenir el submit del form
-                event.preventDefault(); 
+                alert("Por favor, selecciona un archivo primero.");
                 return;
             }
 
-            // Cambiar botones
-            btnUpload.style.display = 'none'; // Ocultar azul
-            btnStop.style.display = 'block';  // Mostrar rojo
-
+            // 2. Cambiar interfaz visual (Mostrar barra, cambiar botones)
+            btnUpload.style.display = 'none';
+            btnStop.style.display = 'block';
+            
             progressContainer.style.display = 'block';
             progressBar.style.width = '1%';
             progressBar.innerText = '1%';
-            progressBar.style.backgroundColor = '#28a745'; 
+            progressBar.style.backgroundColor = '#28a745';
             statusText.style.color = '#666';
             statusText.innerText = "Iniciando carga...";
+
+            // 3. Enviar formulario manualmente
+            form.submit();
         }
 
         function detenerCarga() {
-            // DETENER: "Navegamos" el iframe a una página en blanco para cortar la conexión
+            // DETENER: Cortamos la conexión del iframe navegando a blanco
             iframe.src = 'about:blank';
             
-            // UI Update
             statusText.innerText = "🛑 Carga detenida por el usuario. No se guardaron datos.";
             statusText.style.color = '#dc3545';
             progressBar.style.backgroundColor = '#dc3545';
@@ -190,7 +193,8 @@
             btnUpload.innerText = "Reintentar";
         }
 
-        // --- FUNCIONES LLAMADAS DESDE PYTHON ---
+        // --- FUNCIONES QUE PYTHON LLAMA DESDE EL IFRAME ---
+        // (window.NombreFuncion es necesario para que el iframe las vea como parent.NombreFuncion)
 
         window.updateStatus = function(mensaje, porcentaje) {
             statusText.innerText = mensaje;
@@ -209,7 +213,7 @@
         window.finalizarCarga = function(mensaje) {
             progressBar.style.width = '100%';
             progressBar.innerText = '100%';
-            statusText.innerText = mensaje + " Recargando...";
+            statusText.innerText = mensaje + " - Recargando...";
             
             setTimeout(() => {
                 window.location.reload(); 
@@ -217,11 +221,10 @@
         }
 
         window.errorCarga = function(mensaje) {
-            progressBar.style.backgroundColor = '#dc3545'; 
+            progressBar.style.backgroundColor = '#dc3545';
             statusText.innerText = mensaje;
             statusText.style.color = 'red';
             
-            // Restaurar botones
             btnStop.style.display = 'none';
             btnUpload.style.display = 'block';
             btnUpload.disabled = false;
