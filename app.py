@@ -1411,23 +1411,21 @@ def ver_tiradas_web():
 @app.route('/estacion/medios-pagos', methods=['GET', 'POST'])
 @login_required
 def medios_pagos():
-    # Importaciones necesarias
     from flask import Response, stream_with_context
     import re
     import pandas as pd
     import traceback
     import io
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from openpyxl import load_workbook
 
-    # 1. SI ES GET (Mostrar la página normal)
+    # 1. GET: Mostrar página
     if request.method == 'GET':
         fecha_url = request.args.get('fecha')
         fecha_filtro = fecha_url if fecha_url else datetime.now().strftime('%Y-%m-%d')
-
-        # Cargar datos para mostrar en la tabla
-        pagos_db = PagoElectronico.query.filter_by(user_id=current_user.id, fecha=fecha_filtro).all()
         
+        # Cargar datos agrupados
+        pagos_db = PagoElectronico.query.filter_by(user_id=current_user.id, fecha=fecha_filtro).all()
         datos_agrupados = {}
         for p in pagos_db:
             vend = p.vendedor or "Sin Asignar"
@@ -1437,40 +1435,35 @@ def medios_pagos():
                 if 6 <= h < 14: turno = "Mañana"
                 elif 14 <= h < 22: turno = "Tarde"
             except: pass
-            
             if vend not in datos_agrupados: datos_agrupados[vend] = {"Mañana": [], "Tarde": [], "Noche": []}
             datos_agrupados[vend][turno].append(p)
-
+            
         return render_template('medios_pagos.html', fecha=fecha_filtro, datos=datos_agrupados)
 
-    # 2. SI ES POST (Procesar archivo con Barra de Carga)
-    # Usamos stream_with_context para enviar actualizaciones en vivo
+    # 2. POST: Procesar con Streaming (Barra de Carga)
     def generate_processing():
+        # Relleno inicial para forzar al navegador a renderizar (Anti-Buffering)
+        yield " " * 2048 + "\n"
+        
         archivo = request.files['archivo']
         if not archivo or not archivo.filename:
             yield '<script>parent.errorCarga("Archivo vacío");</script>'
             return
 
         try:
-            # Avisar que estamos leyendo
-            yield '<script>parent.updateStatus("Leyendo archivo...", 5);</script>'
+            yield '<script>parent.updateStatus("Leyendo archivo...", 5);</script>\n'
             
-            # --- LECTURA DE ARCHIVO ---
+            # --- LECTURA ---
             df = None
             filename = archivo.filename.lower()
-            
             if filename.endswith('.csv'):
                 try:
                     archivo.seek(0)
                     df = pd.read_csv(archivo, sep=';', encoding='utf-8', engine='python')
                     if len(df.columns) < 2: raise Exception("Fallo sep ;")
                 except:
-                    try:
-                        archivo.seek(0)
-                        df = pd.read_csv(archivo, sep=None, encoding='utf-8', engine='python')
-                    except:
-                        archivo.seek(0)
-                        df = pd.read_csv(archivo, sep=None, encoding='latin1', engine='python')
+                    try: archivo.seek(0); df = pd.read_csv(archivo, sep=None, encoding='utf-8', engine='python')
+                    except: archivo.seek(0); df = pd.read_csv(archivo, sep=None, encoding='latin1', engine='python')
             else:
                 try:
                     archivo_bytes = archivo.read()
@@ -1489,35 +1482,25 @@ def medios_pagos():
                 yield '<script>parent.errorCarga("Formato no reconocido");</script>'
                 return
 
-            # --- PREPARACIÓN ---
             df.columns = [str(c).strip().lower() for c in df.columns]
             cols = list(df.columns)
             total_filas = len(df)
             
-            if total_filas == 0:
-                yield '<script>parent.finalizarCarga("El archivo está vacío");</script>'
-                return
-
-            yield f'<script>parent.updateStatus("Iniciando procesamiento de {total_filas} registros...", 10);</script>'
+            yield f'<script>parent.updateStatus("Procesando {total_filas} registros...", 10);</script>\n'
 
             col_mp_id = next((c for c in cols if "operation_id" in c or "operación" in c), None)
             col_ypf_motor = next((c for c in cols if "motor de pago" in c), None)
             
             count = 0
             
-            # =========================================================
-            # PROCESAMIENTO FILA POR FILA (Aquí actualizamos la barra)
-            # =========================================================
-            
-            # BLOQUE MERCADO PAGO
-            if col_mp_id and not col_ypf_motor:
+            # --- LOOP PROCESAMIENTO ---
+            if col_mp_id and not col_ypf_motor: # MERCADO PAGO
                 col_fecha = next((c for c in cols if "date_created" in c or "fecha" in c), None)
                 col_caja = next((c for c in cols if "external_id" in c or "caja externo" in c), None)
                 col_monto = next((c for c in cols if "transaction_amount" in c or "valor del producto" in c or "importe" in c), None)
 
                 for i, row in df.iterrows():
                     try:
-                        # --- Lógica MP ---
                         caja_str = str(row.get(col_caja, '')).strip().lower()
                         nums = re.findall(r'\d+', caja_str)
                         surtidor_raw = 0
@@ -1545,7 +1528,6 @@ def medios_pagos():
                                 diff = abs(seg_v - seg_mp)
                                 if diff < 600 and diff < best_diff:
                                     best_diff = diff; cand = v
-                        
                         if cand: vend_enc = cand.vendedor; prod_enc = cand.combustible
 
                         nuevo = PagoElectronico(user_id=current_user.id, origen='MERCADO PAGO', fecha=fecha_str, hora=hora_str, surtidor=surtidor_raw, monto=monto, vendedor=vend_enc, area='Playa', producto=prod_enc)
@@ -1553,14 +1535,11 @@ def medios_pagos():
                         count += 1
                     except: pass
                     
-                    # ACTUALIZAR BARRA CADA 5 FILAS (Para no saturar)
-                    if i % 5 == 0 or i == total_filas - 1:
+                    if i % 2 == 0:
                         porcentaje = int((i / total_filas) * 100)
-                        # Enviamos script JS al navegador
-                        yield f'<script>parent.updateBar({porcentaje}, {count});</script>'
+                        yield f'<script>parent.updateBar({porcentaje}, {count});</script>\n'
 
-            # BLOQUE APP YPF
-            elif col_ypf_motor or any("redenciones" in c for c in cols):
+            elif col_ypf_motor or any("redenciones" in c for c in cols): # YPF
                 col_fecha = next((c for c in cols if c == "fecha"), None)
                 col_hora = next((c for c in cols if c == "hora"), None)
                 col_pto = next((c for c in cols if "punto de venta" in c), None)
@@ -1570,7 +1549,6 @@ def medios_pagos():
 
                 for i, row in df.iterrows():
                     try:
-                        # --- Lógica YPF ---
                         nums = re.findall(r'\d+', str(row.get(col_pto, '')))
                         if not nums: continue
                         surt = int(nums[-1])
@@ -1593,22 +1571,26 @@ def medios_pagos():
                         count += 1
                     except: pass
 
-                    if i % 5 == 0 or i == total_filas - 1:
+                    if i % 2 == 0:
                         porcentaje = int((i / total_filas) * 100)
-                        yield f'<script>parent.updateBar({porcentaje}, {count});</script>'
+                        yield f'<script>parent.updateBar({porcentaje}, {count});</script>\n'
 
-            # Guardar todo
+            # IMPORTANTE: El commit se hace SOLO si llega al final.
+            # Si el usuario detiene la carga, esto no se ejecuta y no se guarda nada.
             db.session.commit()
             
-            # Finalizar
-            msg_final = f"Proceso completado. Registros cargados: {count}"
+            msg_final = f"Carga finalizada. {count} registros guardados."
             yield f'<script>parent.finalizarCarga("{msg_final}");</script>'
 
         except Exception as e:
             traceback.print_exc()
             yield f'<script>parent.errorCarga("Error Crítico: {str(e)}");</script>'
 
-    # Retornamos la respuesta como STREAM (flujo de datos)
-    return Response(stream_with_context(generate_processing()))
+    # Cabeceras anti-buffering
+    return Response(stream_with_context(generate_processing()), headers={
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache',
+        'Content-Type': 'text/html; charset=utf-8'
+    })
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)

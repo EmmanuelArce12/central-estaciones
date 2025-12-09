@@ -13,9 +13,17 @@
         
         /* BOTONES */
         .btn-back { text-decoration: none; color: #555; padding: 8px 15px; border: 1px solid #ccc; border-radius: 5px; background: white; }
+        
         .btn-upload { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
         .btn-upload:disabled { background: #ccc; cursor: not-allowed; }
         
+        /* BOTÓN DETENER (ROJO FUERTE) */
+        .btn-stop { background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; display: none; }
+        .btn-stop:hover { background: #c82333; }
+
+        .btn-delete { background: white; color: #dc3545; border: 1px solid #dc3545; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+        .btn-delete:hover { background: #dc3545; color: white; }
+
         /* BARRA DE PROGRESO */
         #progress-container { width: 100%; margin-top: 15px; display: none; }
         .progress-wrapper { width: 100%; background-color: #e9ecef; border-radius: 10px; overflow: hidden; height: 25px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); }
@@ -30,7 +38,7 @@
         
         #status-text { margin-top: 5px; font-size: 0.9rem; color: #666; text-align: center; }
 
-        /* ACORDEÓN Y TABLAS */
+        /* ACORDEÓN */
         .accordion { margin-top: 20px; }
         .acc-item { background: white; border-radius: 8px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .acc-header { padding: 15px 20px; cursor: pointer; display: flex; justify-content: space-between; border-left: 5px solid #ccc; background: white; }
@@ -38,7 +46,6 @@
         .acc-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background: #fafafa; }
         
         .turno-block { padding: 15px; border-bottom: 1px solid #eee; }
-        .turno-title { font-weight: bold; color: #555; margin-bottom: 5px; font-size: 0.9rem; text-transform: uppercase; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85rem; background: white; }
         th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
         th { background: #f1f3f5; }
@@ -69,7 +76,19 @@
 
         <form id="uploadForm" method="POST" enctype="multipart/form-data" target="hidden_iframe" style="display:flex; align-items:center; gap:10px;">
             <input type="file" name="archivo" accept=".csv, .xlsx" required style="font-size:0.9rem;">
-            <button type="submit" class="btn-upload" id="btnUpload" onclick="iniciarCarga()">Procesar Archivo</button>
+            
+            <button type="submit" class="btn-upload" id="btnUpload" onclick="iniciarCarga()">
+                ▶ Procesar Archivo
+            </button>
+            
+            <button type="button" class="btn-stop" id="btnStop" onclick="detenerCarga()">
+                🛑 DETENER CARGA
+            </button>
+        </form>
+
+        <form action="{{ url_for('borrar_mp') }}" method="POST" onsubmit="return confirm('¿Borrar Mercado Pago de esta fecha?');">
+            <input type="hidden" name="fecha_borrar" value="{{ fecha }}">
+            <button type="submit" class="btn-delete" title="Borrar solo MP de hoy">🗑️</button>
         </form>
 
         <div id="progress-container">
@@ -100,7 +119,7 @@
                         {% for nombre_turno, pagos in turnos.items() %}
                             {% if pagos %}
                             <div class="turno-block">
-                                <div class="turno-title">Turno {{ nombre_turno }}</div>
+                                <div style="font-weight:bold; color:#555; margin-bottom:5px;">Turno {{ nombre_turno }}</div>
                                 <table>
                                     <thead><tr><th>Hora</th><th>Origen</th><th>Surt.</th><th>Producto</th><th style="text-align:right;">Monto</th></tr></thead>
                                     <tbody>
@@ -128,26 +147,51 @@
 
     <script>
         const btnUpload = document.getElementById('btnUpload');
+        const btnStop = document.getElementById('btnStop');
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progressBar');
         const statusText = document.getElementById('status-text');
+        const iframe = document.getElementById('hidden_iframe');
 
         function iniciarCarga() {
             const fileInput = document.querySelector('input[name="archivo"]');
-            if(!fileInput.files.length) return; 
-            
-            btnUpload.disabled = true;
-            btnUpload.innerText = "Procesando...";
+            if(!fileInput.files.length) {
+                alert("Selecciona un archivo primero.");
+                // Retornamos false para prevenir el submit del form
+                event.preventDefault(); 
+                return;
+            }
+
+            // Cambiar botones
+            btnUpload.style.display = 'none'; // Ocultar azul
+            btnStop.style.display = 'block';  // Mostrar rojo
+
             progressContainer.style.display = 'block';
             progressBar.style.width = '1%';
             progressBar.innerText = '1%';
             progressBar.style.backgroundColor = '#28a745'; 
             statusText.style.color = '#666';
-            statusText.innerText = "Subiendo archivo...";
+            statusText.innerText = "Iniciando carga...";
         }
 
-        // --- FUNCIONES LLAMADAS DESDE PYTHON (app.py) ---
-        
+        function detenerCarga() {
+            // DETENER: "Navegamos" el iframe a una página en blanco para cortar la conexión
+            iframe.src = 'about:blank';
+            
+            // UI Update
+            statusText.innerText = "🛑 Carga detenida por el usuario. No se guardaron datos.";
+            statusText.style.color = '#dc3545';
+            progressBar.style.backgroundColor = '#dc3545';
+            
+            // Restaurar botones
+            btnStop.style.display = 'none';
+            btnUpload.style.display = 'block';
+            btnUpload.disabled = false;
+            btnUpload.innerText = "Reintentar";
+        }
+
+        // --- FUNCIONES LLAMADAS DESDE PYTHON ---
+
         window.updateStatus = function(mensaje, porcentaje) {
             statusText.innerText = mensaje;
             if(porcentaje) {
@@ -173,9 +217,13 @@
         }
 
         window.errorCarga = function(mensaje) {
-            progressBar.style.backgroundColor = '#dc3545'; // Rojo error
+            progressBar.style.backgroundColor = '#dc3545'; 
             statusText.innerText = mensaje;
             statusText.style.color = 'red';
+            
+            // Restaurar botones
+            btnStop.style.display = 'none';
+            btnUpload.style.display = 'block';
             btnUpload.disabled = false;
             btnUpload.innerText = "Reintentar";
         }
