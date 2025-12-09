@@ -7,15 +7,17 @@
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; padding: 20px; max-width: 1100px; margin: 0 auto; }
         
+        /* HEADER */
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
         .controls { display: flex; gap: 15px; align-items: center; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); flex-wrap: wrap; }
         
+        /* BOTONES */
         .btn-back { text-decoration: none; color: #555; padding: 8px 15px; border: 1px solid #ccc; border-radius: 5px; background: white; }
         .btn-upload { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
         .btn-upload:disabled { background: #ccc; cursor: not-allowed; }
         .btn-delete { background: #dc3545; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; }
 
-        /* ESTILOS DE LA BARRA DE PROGRESO */
+        /* BARRA DE PROGRESO */
         #progress-container {
             width: 100%;
             margin-top: 15px;
@@ -47,7 +49,7 @@
         
         #status-text { margin-top: 5px; font-size: 0.9rem; color: #666; text-align: center; }
 
-        /* Acordeón y Tablas */
+        /* ACORDEÓN Y TABLAS */
         .accordion { margin-top: 20px; }
         .acc-item { background: white; border-radius: 8px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .acc-header { padding: 15px 20px; cursor: pointer; display: flex; justify-content: space-between; border-left: 5px solid #ccc; background: white; }
@@ -109,88 +111,101 @@
     {% endif %}
 
     <div class="accordion">
-        {% for vendedor, turnos in datos.items() %}
-            {% set total_vend = 0 %}
-            {% for t, lista in turnos.items() %}{% for p in lista %}{% set total_vend = total_vend + p.monto %}{% endfor %}{% endfor %}
-            <div class="acc-item">
-                <div class="acc-header" onclick="toggleAcc(this)">
-                    <div><strong>{{ vendedor }}</strong></div>
-                    <div><span style="font-weight:bold;">${{ "{:,.2f}".format(total_vend) }}</span> <span>▼</span></div>
+        {% if datos %}
+            {% for vendedor, turnos in datos.items() %}
+                {% set total_vend = 0 %}
+                {% for t, lista in turnos.items() %}{% for p in lista %}{% set total_vend = total_vend + p.monto %}{% endfor %}{% endfor %}
+                <div class="acc-item">
+                    <div class="acc-header" onclick="toggleAcc(this)">
+                        <div><strong>{{ vendedor }}</strong></div>
+                        <div><span style="font-weight:bold;">${{ "{:,.2f}".format(total_vend) }}</span> <span>▼</span></div>
+                    </div>
+                    <div class="acc-content">
+                        {% for nombre_turno, pagos in turnos.items() %}
+                            {% if pagos %}
+                            <div class="turno-block">
+                                <div class="turno-title">Turno {{ nombre_turno }}</div>
+                                <table>
+                                    <thead><tr><th>Hora</th><th>Origen</th><th>Surt.</th><th>Producto</th><th style="text-align:right;">Monto</th></tr></thead>
+                                    <tbody>
+                                        {% for p in pagos %}
+                                        <tr>
+                                            <td>{{ p.hora }}</td>
+                                            <td><span class="{{ 'badge-mp' if p.origen == 'MERCADO PAGO' else 'badge-ypf' }}">{{ 'MP' if p.origen == 'MERCADO PAGO' else 'YPF' }}</span></td>
+                                            <td align="center">{{ p.surtidor }}</td>
+                                            <td>{{ p.producto or '-' }}</td>
+                                            <td align="right">${{ "{:,.2f}".format(p.monto) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
                 </div>
-                <div class="acc-content">
-                    {% for nombre_turno, pagos in turnos.items() %}
-                        {% if pagos %}
-                        <div class="turno-block">
-                            <div class="turno-title">Turno {{ nombre_turno }}</div>
-                            <table>
-                                <thead><tr><th>Hora</th><th>Origen</th><th>Surt.</th><th>Producto</th><th style="text-align:right;">Monto</th></tr></thead>
-                                <tbody>
-                                    {% for p in pagos %}
-                                    <tr>
-                                        <td>{{ p.hora }}</td>
-                                        <td><span class="{{ 'badge-mp' if p.origen == 'MERCADO PAGO' else 'badge-ypf' }}">{{ 'MP' if p.origen == 'MERCADO PAGO' else 'YPF' }}</span></td>
-                                        <td align="center">{{ p.surtidor }}</td>
-                                        <td>{{ p.producto or '-' }}</td>
-                                        <td align="right">${{ "{:,.2f}".format(p.monto) }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-            </div>
+            {% endfor %}
         {% else %}
             <div style="text-align:center; padding:40px; color:#999;">No hay datos para esta fecha.</div>
-        {% endfor %}
+        {% endif %}
     </div>
 
     <script>
-        // --- LÓGICA DE LA BARRA DE PROGRESO ---
         const btnUpload = document.getElementById('btnUpload');
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progressBar');
         const statusText = document.getElementById('status-text');
 
+        // Se ejecuta al hacer click en Procesar
         function iniciarCarga() {
+            // Solo iniciamos si hay archivo seleccionado
+            const fileInput = document.querySelector('input[name="archivo"]');
+            if(!fileInput.files.length) return; 
+            
             btnUpload.disabled = true;
             btnUpload.innerText = "Procesando...";
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.innerText = '0%';
+            progressBar.style.backgroundColor = '#28a745'; // Reset color verde
+            statusText.style.color = '#666';
             statusText.innerText = "Subiendo archivo...";
         }
 
-        // Estas funciones son llamadas DESDE EL SERVIDOR (via iframe)
-        function updateStatus(mensaje, porcentajeFake) {
+        // --- FUNCIONES LLAMADAS DESDE PYTHON (app.py) ---
+        
+        function updateStatus(mensaje, porcentaje) {
             statusText.innerText = mensaje;
-            if(porcentajeFake) {
-                progressBar.style.width = porcentajeFake + '%';
-                progressBar.innerText = porcentajeFake + '%';
+            if(porcentaje) {
+                progressBar.style.width = porcentaje + '%';
+                progressBar.innerText = porcentaje + '%';
             }
         }
 
         function updateBar(porcentaje, procesados) {
-            // Aseguramos que la barra avance visualmente
             progressBar.style.width = porcentaje + '%';
             progressBar.innerText = porcentaje + '%';
             statusText.innerText = "Procesando registro " + procesados + "...";
         }
 
+        function finalizaredCarga(mensaje) { // Nombre corregido para coincidir
+           // Nota: en tu app.py pusiste finalizarCarga, aquí también
+           finalizarCarga(mensaje);
+        }
+
         function finalizarCarga(mensaje) {
             progressBar.style.width = '100%';
             progressBar.innerText = '100%';
-            statusText.innerText = mensaje;
+            statusText.innerText = mensaje + " Recargando...";
             
             setTimeout(() => {
-                // Recargamos la página para ver los resultados en la tabla
+                // Recargar para ver los datos (POST terminó, ahora hacemos GET)
                 window.location.reload(); 
-            }, 1000);
+            }, 1500);
         }
 
         function errorCarga(mensaje) {
-            progressBar.style.backgroundColor = '#dc3545'; // Rojo
+            progressBar.style.backgroundColor = '#dc3545'; // Rojo error
             statusText.innerText = mensaje;
             statusText.style.color = 'red';
             btnUpload.disabled = false;
