@@ -1417,7 +1417,9 @@ def medios_pagos():
     import re 
     import pandas as pd
     import traceback
+    import io
     from datetime import datetime
+    from openpyxl import load_workbook
 
     if request.method == 'POST':
         if 'archivo' not in request.files:
@@ -1430,11 +1432,13 @@ def medios_pagos():
         try:
             print(f"📂 Iniciando carga de archivo: {archivo.filename}")
             
-            # 1. INTENTO DE LECTURA ROBUSTA
-            # Probamos varios motores y encodings para que no falle al abrir
+            # =========================================================
+            # 1. LECTURA ROBUSTA (CSV / EXCEL)
+            # =========================================================
             filename = archivo.filename.lower()
             df = None
             
+            # A) Si es CSV
             if filename.endswith('.csv'):
                 try:
                     df = pd.read_csv(archivo, encoding='utf-8', sep=None, engine='python')
@@ -1442,12 +1446,9 @@ def medios_pagos():
                     archivo.seek(0)
                     df = pd.read_csv(archivo, encoding='latin1', sep=None, engine='python')
             
+            # B) Si es EXCEL (Usamos tu método con openpyxl para evitar errores de estilo)
             else:
-                import io
-                from openpyxl import load_workbook
-
                 try:
-                    # ✅ LECTURA A PRUEBA DE ESTILOS ROTOS (SOLUCIÓN DEFINITIVA)
                     archivo_bytes = archivo.read()
                     archivo.seek(0)
 
@@ -1456,22 +1457,20 @@ def medios_pagos():
                         read_only=True,
                         data_only=True
                     )
-
                     ws = wb.active
-
                     data = []
                     for row in ws.iter_rows(values_only=True):
                         data.append(list(row))
 
                     # Convertimos a DataFrame
+                    if not data:
+                        raise Exception("El Excel parece estar vacío.")
+                        
                     df = pd.DataFrame(data)
 
                     # Usar primera fila como encabezado
                     df.columns = df.iloc[0]
                     df = df.iloc[1:].reset_index(drop=True)
-
-                    # Normalizar columnas
-                    df.columns = [str(c).strip().lower() for c in df.columns]
 
                     print("✅ Excel cargado correctamente ignorando estilos.")
 
@@ -1481,9 +1480,10 @@ def medios_pagos():
                     msg = f"❌ Error Crítico al leer el Excel: {str(e)}"
                     return render_template('medios_pagos.html', msg=msg)
 
-
-
-
+            # =========================================================
+            # 2. PROCESAMIENTO
+            # =========================================================
+            
             # Normalizamos nombres de columnas (minusculas y sin espacios extra)
             df.columns = [str(c).strip().lower() for c in df.columns]
             cols = list(df.columns)
@@ -1492,12 +1492,14 @@ def medios_pagos():
             count = 0
             errores = 0
 
-            # =========================================================
-            # DETECCIÓN 1: MERCADO PAGO (Collection)
-            # =========================================================
+            # Detectamos qué archivo es
             col_mp_id = next((c for c in cols if "operation_id" in c or "operación" in c), None)
             col_ypf_motor = next((c for c in cols if "motor de pago" in c), None)
+            col_ypf_red = next((c for c in cols if "redenciones" in c), None)
 
+            # ---------------------------------------------------------
+            # BLOQUE A: MERCADO PAGO
+            # ---------------------------------------------------------
             if col_mp_id and not col_ypf_motor:
                 print("🔵 Detectado formato: MERCADO PAGO")
                 
@@ -1510,32 +1512,32 @@ def medios_pagos():
                 else:
                     for i, row in df.iterrows():
                         try:
-                            # A. Surtidor
+                            # 1. Surtidor
                             caja_str = str(row.get(col_caja, '')).strip().lower()
                             nums = re.findall(r'\d+', caja_str)
                             if not nums: continue
                             
                             surtidor_raw = int(nums[-1])
+                            # Filtro: Ignorar Shop (101) o surtidores 0
                             if surtidor_raw > 99 or surtidor_raw == 0: continue
 
-                            # B. Fecha
+                            # 2. Fecha
                             fecha_raw = str(row.get(col_fecha, ''))
                             try:
                                 dt_obj = pd.to_datetime(fecha_raw, dayfirst=True)
                             except:
-                                # Intento limpiar comillas o basura
                                 clean_date = fecha_raw.replace('"', '').replace('=', '').strip()
                                 dt_obj = pd.to_datetime(clean_date, dayfirst=True)
 
                             fecha_str = dt_obj.strftime('%Y-%m-%d')
                             hora_str = dt_obj.strftime('%H:%M:%S')
 
-                            # C. Monto
+                            # 3. Monto
                             monto_val = row.get(col_monto, 0)
                             monto_str = str(monto_val).replace(',', '.')
                             monto = float(monto_str)
 
-                            # D. Cruce Vendedor
+                            # 4. Cruce Vendedor (Lógica Temporal)
                             vendedor_encontrado = "Desconocido (MP)"
                             ventas_candidatas = VentaVendedor.query.filter_by(
                                 user_id=current_user.id,
@@ -1557,6 +1559,7 @@ def medios_pagos():
                                         vendedor_encontrado = v.vendedor
                                 except: pass
 
+                            # 5. Guardar
                             nuevo = PagoElectronico(
                                 user_id=current_user.id,
                                 origen='MERCADO PAGO',
@@ -1577,13 +1580,13 @@ def medios_pagos():
                     
                     msg = f"✅ Procesados {count} MP (Ignorados {errores})."
 
-            # =========================================================
-            # DETECCIÓN 2: APP YPF
-            # =========================================================
-            elif col_ypf_motor or any("redenciones" in c for c in cols):
+            # ---------------------------------------------------------
+            # BLOQUE B: APP YPF (Tu bloque que funciona bien)
+            # ---------------------------------------------------------
+            elif col_ypf_motor or col_ypf_red:
                 print("🟣 Detectado formato: APP YPF")
                 
-                # Definimos la función de limpieza AQUÍ para que esté disponible
+                # Función de limpieza (Mantenemos la que funciona)
                 def limpiar_valor_ypf_safe(valor):
                     try:
                         texto = str(valor).strip()
@@ -1591,19 +1594,16 @@ def medios_pagos():
                         if '$' in texto:
                             partes = texto.split('$')
                             if len(partes) > 1:
-                                texto = partes[1] # Tomar lo que sigue al primer $
-
+                                texto = partes[1]
                         # 2. Buscar números
                         match = re.search(r'[\d\.,]+', texto)
                         if match:
                             num_str = match.group(0)
-                            # Normalizar
                             if '.' in num_str and ',' in num_str:
                                 num_str = num_str.replace('.', '').replace(',', '.')
                             elif ',' in num_str:
                                 num_str = num_str.replace(',', '.')
                             return float(num_str)
-                        
                         return float(texto)
                     except:
                         return 0.0
@@ -1620,25 +1620,21 @@ def medios_pagos():
 
                 for i, row in df.iterrows():
                     try:
-                        # Filtro Playa
                         area = str(row.get(col_area, '')).strip()
                         if "playa" not in area.lower(): continue
 
-                        # Surtidor
                         pv_str = str(row.get(col_pto_venta, ''))
                         nums = re.findall(r'\d+', pv_str)
                         if not nums: continue
                         surtidor_raw = int(nums[-1])
                         if surtidor_raw == 101: continue
 
-                        # Fechas y Textos
                         fecha_full = str(row.get(col_fecha, ''))
                         fecha_str = fecha_full.split(" ")[0]
                         hora_str = str(row.get(col_hora, ''))
                         vend = str(row.get(col_vendedor, ''))
                         prod = str(row.get(col_prod, ''))
 
-                        # Montos (Blindado)
                         monto = limpiar_valor_ypf_safe(row.get(col_importe, 0))
                         desc = limpiar_valor_ypf_safe(row.get(col_desc, 0))
                         red = limpiar_valor_ypf_safe(row.get(col_red, 0))
@@ -1671,7 +1667,7 @@ def medios_pagos():
             db.session.commit()
 
         except Exception as e:
-            traceback.print_exc() # Esto imprime el error real en la terminal
+            traceback.print_exc()
             msg = f"❌ Error Crítico: {str(e)}"
 
     # Cargar tabla final
