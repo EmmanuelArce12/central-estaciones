@@ -167,29 +167,36 @@ def procesar_info_desde_id(id_vox, texto_original=""):
 # ==========================================
 
 # --- MODELO DE USUARIO (Actualizado) ---
+# --- MODELO DE USUARIO CORREGIDO ---
 class User(UserMixin, db.Model):
-    __tablename__ = 'users'
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(150), unique=True, nullable=False) # El email será el username
-    email = db.Column(db.String(150), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256))
+    __tablename__ = 'users'  # <--- CRUCIAL: Obliga a usar la tabla que ya arreglamos
     
-    # Nuevos campos
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    username = db.Column(db.String(120), unique=True, nullable=False) # A veces se usa igual que el email
+    password_hash = db.Column(db.String(128))
+    
+    # Columnas nuevas (tienen que estar aquí para que el login no explote)
     nombre = db.Column(db.String(100))
     apellido = db.Column(db.String(100))
-    role = db.Column(db.String(50), default='estacion') # 'superadmin', 'admin', 'vendedor'
-    plain_password = db.Column(db.String(100)) # Para que el admin pueda verla
-    
-    # Relación para saber a qué estación pertenece el vendedor (si es multitenant)
-    # Por ahora asumimos que el admin crea usuarios en SU estación.
-    station_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    role = db.Column(db.String(50), default='estacion') 
+    plain_password = db.Column(db.String(100))
+    is_superadmin = db.Column(db.Boolean, default=False)
 
     def set_password(self, password):
-        self.plain_password = password # Guardamos la visible
+        self.plain_password = password # Guardamos copia visible (opcional)
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+# --- CARGADOR DE USUARIO (NECESARIO PARA EL LOGIN) ---
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return User.query.get(int(user_id))
+    except:
+        return None
 
 class Channel(db.Model):
     __tablename__ = 'channels'
