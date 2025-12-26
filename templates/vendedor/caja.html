@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Mi Caja</title>
+    <style>
+        body { font-family: Arial; background: #f4f6f8; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; max-width: 600px; margin: auto; }
+        label { display: block; margin-top: 15px; font-weight: bold; }
+        input, select, textarea {
+            width: 100%; padding: 8px; margin-top: 5px;
+            border-radius: 4px; border: 1px solid #ccc;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px;
+            background: #004b8d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="card">
+    <h2>📦 Mi Caja</h2>
+
+    <form method="POST">
+        <label>Turno</label>
+        <select name="turno" required>
+            <option value="mañana">Mañana</option>
+            <option value="tarde">Tarde</option>
+            <option value="noche">Noche</option>
+        </select>
+
+        <label>Sector</label>
+        <select name="sector" required>
+            <option value="sin_gnc">Combustible SIN GNC</option>
+            <option value="con_gnc">Combustible CON GNC</option>
+            <option value="gnc">Solo GNC</option>
+        </select>
+
+        <label>Observaciones</label>
+        <textarea name="observaciones"></textarea>
+
+        <button type="submit">Guardar Caja</button>
+    </form>
+
+</div>
+
+</body>
+</html>

@@ -23,6 +23,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
+
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / '.env')
 
@@ -181,6 +183,8 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=True)
     username = db.Column(db.String(120), unique=True, nullable=False) # A veces se usa igual que el email
     password_hash = db.Column(db.Text, nullable=False)
+    cajas = db.relationship('Caja', backref='usuario', lazy=True)
+
 
     
     # Columnas nuevas (tienen que estar aquí para que el login no explote)
@@ -189,6 +193,7 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(50), default='estacion') 
     plain_password = db.Column(db.String(100))
     is_superadmin = db.Column(db.Boolean, default=False)
+
 
     
     def set_password(self, password):
@@ -309,6 +314,35 @@ with app.app_context():
 import string # Asegurate de importar esto arriba
 
 # --- RUTAS DE GESTIÓN DE VENDEDORES ---
+@app.route('/vendedor/caja', methods=['GET', 'POST'])
+@login_required
+def vendedor_caja():
+    if current_user.role != 'vendedor':
+        abort(403)
+
+    caja = Caja.query.filter_by(
+        vendedor_id=current_user.id,
+        fecha=date.today()
+    ).first()
+
+    if not caja:
+        caja = Caja(
+            vendedor_id=current_user.id,
+            estacion_id=current_user.estacion_id
+        )
+        db.session.add(caja)
+        db.session.commit()
+
+    if request.method == 'POST':
+        caja.turno = request.form['turno']
+        caja.sector = request.form['sector']
+        caja.datos = {
+            'observaciones': request.form.get('observaciones')
+        }
+        db.session.commit()
+
+    return render_template('vendedor/caja.html', caja=caja)
+
 @app.route('/admin_gestion_estacion')
 @login_required
 def admin_gestion_estacion():
