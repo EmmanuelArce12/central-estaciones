@@ -313,20 +313,24 @@ import string # Asegurate de importar esto arriba
 @app.route('/admin_gestion_estacion')
 @login_required
 def admin_gestion_estacion():
+    # Blindaje total de role
     role = current_user.role or 'estacion'
 
     if role not in ['admin', 'superadmin', 'estacion']:
         flash('Acceso denegado.', 'error')
         return redirect(url_for('root'))
 
+    # Traer vendedores
     vendedores = User.query.filter_by(role='vendedor').all()
 
+    # Blindaje de campos para Jinja
     for v in vendedores:
         v.nombre = v.nombre or ""
         v.apellido = v.apellido or ""
-        v.email = v.email or ""
+        v.email = getattr(v, 'email', '') or ""
         v.plain_password = v.plain_password or ""
 
+    from datetime import datetime
     date_today = datetime.now().strftime('%Y-%m-%d')
 
     return render_template(
@@ -334,6 +338,7 @@ def admin_gestion_estacion():
         vendedores=vendedores,
         date_today=date_today
     )
+
 
 
 # --- RUTA PARA CREAR EL VENDEDOR (DENTRO DE LA MISMA TABLA) ---
