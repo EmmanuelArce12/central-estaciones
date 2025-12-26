@@ -19,7 +19,13 @@ from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, time, timedelta
+from pathlib import Path
 from dotenv import load_dotenv
+import os
+
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / '.env')
+
 
 load_dotenv()
 
@@ -384,17 +390,40 @@ def cargar_jpv():
 
 @app.route('/')
 def root():
-    if current_user.is_authenticated:
-        return redirect(url_for('panel_superadmin')) if current_user.is_superadmin else redirect(url_for('panel_estacion'))
-    return redirect(url_for('login'))
+    if not current_user.is_authenticated:
+        return redirect(url_for('login'))
+
+    if getattr(current_user, 'is_superadmin', False):
+        return redirect(url_for('panel_superadmin'))
+
+    return redirect(url_for('panel_estacion'))
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        user = User.query.filter_by(username=request.form.get('username')).first()
-        if user and user.check_password(request.form.get('password')):
-            login_user(user); return redirect(url_for('root'))
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        user = User.query.filter_by(username=username).first()
+
+        if not user:
+            flash("Usuario inexistente", "error")
+            return render_template('login.html')
+
+        if not user.password_hash:
+            flash("Usuario sin contraseña configurada", "error")
+            return render_template('login.html')
+
+        if not user.check_password(password):
+            flash("Contraseña incorrecta", "error")
+            return render_template('login.html')
+
+        login_user(user)
+        return redirect(url_for('root'))
+
     return render_template('login.html')
+
 
 @app.route('/logout')
 @login_required
