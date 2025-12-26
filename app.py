@@ -166,24 +166,29 @@ def procesar_info_desde_id(id_vox, texto_original=""):
 # 🗃️ MODELOS DE DATOS
 # ==========================================
 
+# --- MODELO DE USUARIO (Actualizado) ---
 class User(UserMixin, db.Model):
-    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(20), default='estacion', nullable=False)
+    username = db.Column(db.String(150), unique=True, nullable=False) # El email será el username
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256))
     
-    channels = db.relationship('Channel', backref='usuario', lazy=True, cascade="all, delete-orphan")
-    cliente_info = db.relationship('Cliente', backref='usuario', uselist=False, cascade="all, delete-orphan")
-    # Relaciones de datos
-    reportes = db.relationship('Reporte', backref='usuario', lazy=True, cascade="all, delete-orphan")
-    tiradas = db.relationship('Tirada', backref='usuario', lazy=True, cascade="all, delete-orphan")
-    ventas_vendedor = db.relationship('VentaVendedor', backref='usuario', lazy=True, cascade="all, delete-orphan")
+    # Nuevos campos
+    nombre = db.Column(db.String(100))
+    apellido = db.Column(db.String(100))
+    role = db.Column(db.String(50), default='estacion') # 'superadmin', 'admin', 'vendedor'
+    plain_password = db.Column(db.String(100)) # Para que el admin pueda verla
+    
+    # Relación para saber a qué estación pertenece el vendedor (si es multitenant)
+    # Por ahora asumimos que el admin crea usuarios en SU estación.
+    station_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
 
-    def set_password(self, p): self.password_hash = generate_password_hash(p)
-    def check_password(self, p): return check_password_hash(self.password_hash, p)
-    @property
-    def is_superadmin(self): return self.role == 'superadmin'
+    def set_password(self, password):
+        self.plain_password = password # Guardamos la visible
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 class Channel(db.Model):
     __tablename__ = 'channels'
@@ -284,14 +289,70 @@ def load_user(uid): return User.query.get(int(uid))
 # ==========================================
 # 🌐 RUTAS WEB
 # ==========================================
-@app.route('/admin/gestion-estacion')
+import string # Asegurate de importar esto arriba
+
+# --- RUTAS DE GESTIÓN DE VENDEDORES ---
+
+@app.route('/crear_vendedor', methods=['POST'])
+@login_required
+def crear_vendedor():
+    if current_user.role != 'admin' and not current_user.is_superadmin:
+        return jsonify({'error': 'No autorizado'}), 403
+
+    data = request.form
+    nombre = data.get('nombre')
+    apellido = data.get('apellido')
+    email = data.get('email')
+
+    if User.query.filter_by(email=email).first():
+        flash('El email ya está registrado', 'error')
+        return redirect(url_for('admin_gestion_estacion'))
+
+    # Generar contraseña aleatoria de 6 caracteres
+    chars = string.ascii_letters + string.digits
+    password = ''.join(random.choice(chars) for i in range(6))
+
+    nuevo_vendedor = User(
+        username=email,
+        email=email,
+        nombre=nombre,
+        apellido=apellido,
+        role='vendedor',
+        station_owner_id=current_user.id  # Lo vinculamos al admin actual
+    )
+    nuevo_vendedor.set_password(password)
+
+    db.session.add(nuevo_vendedor)
+    db.session.commit()
+
+    flash(f'Vendedor creado: {nombre} {apellido}. Contraseña: {password}', 'success')
+    return redirect(url_for('admin_gestion_estacion'))
+
+@app.route('/cargar_jpv', methods=['POST'])
+@login_required
+def cargar_jpv():
+    # AQUI IRA LA LOGICA DEL EXCEL EN EL FUTURO
+    flash('Funcionalidad de Carga JPV en desarrollo', 'info')
+    return redirect(url_for('admin_gestion_estacion'))
+
+@app.route('/admin_gestion_estacion')
 @login_required
 def admin_gestion_estacion():
-    # Aceptamos superadmin O admin
-    if not current_user.is_superadmin and current_user.role != 'estacion':
-        return redirect(url_for('panel_estacion'))
-    return render_template('admin_gestion_estacion.html', user=current_user)
-
+    # 1. Seguridad
+    if not current_user.is_superadmin and current_user.role != 'admin':
+        return redirect(url_for('index'))
+    
+    # 2. Buscar vendedores
+    vendedores = User.query.filter_by(station_owner_id=current_user.id).all()
+    
+    # 3. Obtener fecha de hoy para el calendario
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    
+    # 4. Enviar todo al HTML (agregamos date_today=hoy)
+    return render_template('admin_gestion_estacion.html', 
+                           user=current_user, 
+                           vendedores=vendedores, 
+                           date_today=hoy)
 @app.route('/')
 def root():
     if current_user.is_authenticated:
