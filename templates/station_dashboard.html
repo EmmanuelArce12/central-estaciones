@@ -124,8 +124,11 @@
                     <p>Visualizar estadísticas y métricas.</p>
                 </div>
             </a>
-
-            <!-- BOTÓN ADMINISTRACIÓN -->
+             <p style="color: red; font-weight: bold;">
+                MI ROL ES: [{{ user.role }}] <br>
+                ES SUPERADMIN: [{{ user.is_superadmin }}]
+            </p>
+                     <!-- BOTÓN ADMINISTRACIÓN -->
             {% if user.is_superadmin or user.role == 'admin' %}
             <a href="{{ url_for('admin_gestion_estacion') }}" class="dashboard-card card-orange">
                 <div class="card-icon">⚙️</div>
