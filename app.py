@@ -183,10 +183,14 @@ class User(UserMixin, db.Model):
     plain_password = db.Column(db.String(100))
     is_superadmin = db.Column(db.Boolean, default=False)
 
+    
     def set_password(self, password):
-        self.plain_password = password # Guardamos copia visible (opcional)
-        self.password_hash = generate_password_hash(password)
+        self.password_hash = generate_password_hash(
+            password,
+            method="pbkdf2:sha256"
+        )
 
+    
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
