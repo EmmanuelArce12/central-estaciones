@@ -309,28 +309,10 @@ with app.app_context():
 import string # Asegurate de importar esto arriba
 
 # --- RUTAS DE GESTIÓN DE VENDEDORES ---
-# --- RUTA PARA MOSTRAR EL PANEL ---
 @app.route('/admin_gestion_estacion')
 @login_required
 def admin_gestion_estacion():
-    # Blindaje total de role
-    role = current_user.role or 'estacion'
-
-    if role not in ['admin', 'superadmin', 'estacion']:
-        flash('Acceso denegado.', 'error')
-        return redirect(url_for('root'))
-
-    # Traer vendedores
     vendedores = User.query.filter_by(role='vendedor').all()
-
-    # Blindaje de campos para Jinja
-    for v in vendedores:
-        v.nombre = v.nombre or ""
-        v.apellido = v.apellido or ""
-        v.email = getattr(v, 'email', '') or ""
-        v.plain_password = v.plain_password or ""
-
-    from datetime import datetime
     date_today = datetime.now().strftime('%Y-%m-%d')
 
     return render_template(
@@ -338,7 +320,6 @@ def admin_gestion_estacion():
         vendedores=vendedores,
         date_today=date_today
     )
-
 
 
 # --- RUTA PARA CREAR EL VENDEDOR (DENTRO DE LA MISMA TABLA) ---
@@ -393,10 +374,8 @@ def crear_vendedor():
 @app.route('/cargar_jpv', methods=['POST'])
 @login_required
 def cargar_jpv():
-    # AQUI IRA LA LOGICA DEL EXCEL EN EL FUTURO
-    flash('Funcionalidad de Carga JPV en desarrollo', 'info')
+    flash('Carga de JPV todavía no implementada', 'error')
     return redirect(url_for('admin_gestion_estacion'))
-
 
 @app.route('/')
 def root():
@@ -412,28 +391,12 @@ def root():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-
-        user = User.query.filter_by(username=username).first()
-
-        if not user:
-            flash("Usuario inexistente", "error")
-            return render_template('login.html')
-
-        if not user.password_hash:
-            flash("Usuario sin contraseña configurada", "error")
-            return render_template('login.html')
-
-        if not user.check_password(password):
-            flash("Contraseña incorrecta", "error")
-            return render_template('login.html')
-
-        login_user(user)
-        return redirect(url_for('root'))
-
+        user = User.query.filter_by(username=request.form['username']).first()
+        if user and user.check_password(request.form['password']):
+            login_user(user)
+            return redirect(url_for('admin_gestion_estacion'))
+        flash('Usuario o contraseña incorrectos', 'error')
     return render_template('login.html')
-
 
 @app.route('/logout')
 @login_required

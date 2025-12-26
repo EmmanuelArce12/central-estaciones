@@ -5,37 +5,37 @@
     <title>Tablero de Control - Estación</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    
+
     <style>
         :root {
-            --primary: #004b8d; /* Azul YPF */
-            --secondary: #ff6600; /* Naranja YPF */
+            --primary: #004b8d;
+            --secondary: #ff6600;
             --bg: #f4f6f8;
             --white: #ffffff;
             --gray: #e0e0e0;
         }
 
-        body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); margin: 0; padding: 20px; }
-        
-        /* --- ESTILOS PARA ALERTAS (NUEVO: PARA EVITAR ERROR ROJO) --- */
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            padding: 20px;
+        }
+
         .alert {
             padding: 15px;
             margin-bottom: 10px;
             border-radius: 5px;
-            border: 1px solid transparent;
         }
         .alert-success {
             background-color: #d4edda;
             color: #155724;
-            border-color: #c3e6cb;
         }
         .alert-error {
             background-color: #f8d7da;
             color: #721c24;
-            border-color: #f5c6cb;
         }
 
-        /* --- HEADER & ACCIONES --- */
         .header-actions {
             display: flex;
             gap: 15px;
@@ -50,68 +50,36 @@
 
         .btn {
             padding: 10px 20px;
-            border: none;
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
             display: flex;
             align-items: center;
             gap: 8px;
-            transition: 0.2s;
             text-decoration: none;
-            color: white;
             font-size: 0.9em;
         }
 
-        .btn-blue { background-color: var(--primary); }
-        .btn-blue:hover { background-color: #003366; }
-        
-        .btn-orange { background-color: var(--secondary); }
-        .btn-orange:hover { background-color: #cc5200; }
-        
-        .btn-outline { 
-            background: transparent; 
-            border: 2px solid var(--primary); 
-            color: var(--primary); 
+        .btn-blue { background-color: var(--primary); color: white; }
+        .btn-orange { background-color: var(--secondary); color: white; }
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--primary);
+            color: var(--primary);
         }
-        .btn-outline:hover { background: #eef4fa; }
 
-        /* --- DASHBOARD GRID --- */
         .main-dashboard {
             display: grid;
-            grid-template-columns: 250px 1fr; /* Calendario a la izq, Cajas a la der */
+            grid-template-columns: 250px 1fr;
             gap: 20px;
         }
 
-        /* Área Izquierda (Calendario/Filtros) */
-        .sidebar-panel {
+        .sidebar-panel,
+        .seller-card,
+        .modal-content {
             background: var(--white);
-            padding: 20px;
             border-radius: 10px;
-            height: fit-content;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        }
-
-        /* Área Derecha (Cajas Vendedores) */
-        .sellers-area {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .shift-block {
-            background: transparent;
-        }
-
-        .shift-header {
-            background: #333;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
+            padding: 20px;
         }
 
         .sellers-grid {
@@ -121,247 +89,54 @@
         }
 
         .seller-card {
-            background: var(--white);
-            border-radius: 8px;
-            padding: 15px;
-            border-left: 5px solid var(--gray); /* Gris por defecto */
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border-left: 5px solid var(--gray);
             position: relative;
         }
-        
-        .seller-card.ok { border-left-color: #28a745; } /* Verde si cuadra */
-        .seller-card.error { border-left-color: #dc3545; } /* Rojo si hay diferencia */
 
-        .seller-card h3 { margin: 0 0 5px 0; font-size: 1.1em; color: #333; }
-        .seller-card p { margin: 0 0 10px 0; color: #666; font-size: 0.9em; }
-        
-        .status-badge { 
-            position: absolute; top: 15px; right: 15px; 
-            font-size: 0.75em; padding: 2px 8px; border-radius: 10px; background: #eee;
-        }
-
-        /* --- MODALS (VENTANAS EMERGENTES) --- */
         .modal {
-            display: none; 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
             z-index: 1000;
         }
-        .modal-content {
-            background: white; padding: 30px; border-radius: 10px; width: 500px; max-width: 90%;
-            position: relative;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        }
-        .close-modal {
-            position: absolute; top: 10px; right: 15px; cursor: pointer; font-size: 1.5em; color: #aaa;
-        }
-        .close-modal:hover { color: #333; }
-        
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; color: #555; font-weight: 500; }
-        .form-group input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
-        .form-group input:focus { border-color: var(--primary); outline: none; }
 
-        /* Tabla de Usuarios */
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9em; }
-        th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; }
-        th { background: #f8f9fa; color: #555; }
-        
-        .gnc-section {
-            border: 2px dashed var(--secondary);
-            background: #fffdf9;
-            padding: 15px;
-            border-radius: 8px;
+        table {
+            width: 100%;
+            border-collapse: collapse;
         }
 
+        th, td {
+            border-bottom: 1px solid #eee;
+            padding: 10px;
+        }
     </style>
 </head>
 
 <body>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div style="margin-bottom: 20px;">
-        {% for category, message in messages %}
-            <div class="alert {{ 'alert-success' if category == 'success' else 'alert-error' }}">
-                {{ message }}
-            </div>
-        {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert {{ 'alert-success' if category == 'success' else 'alert-error' }}">
+        {{ message }}
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
 
-    <div class="header-actions">
-        <h2 style="margin: 0; margin-right: auto; color: var(--primary);">Gestión Operativa</h2>
+<div class="header-actions">
+    <h2 style="margin-right:auto;">Gestión Operativa</h2>
 
-        <button onclick="openModal('modalCrear')" class="btn btn-blue">
-            <i class="fas fa-user-plus"></i> Crear Vendedor
-        </button>
+    <button onclick="openModal('modalCrear')" class="btn btn-blue">
+        <i class="fas fa-user-plus"></i> Crear Vendedor
+    </button>
 
-        <button onclick="openModal('modalVerUsuarios')" class="btn btn-outline">
-            <i class="fas fa-users"></i> Ver Activos
-        </button>
+    <button onclick="openModal('modalVerUsuarios')" class="btn btn-outline">
+        <i class="fas fa-users"></i> Ver Activos
+    </button>
 
-        <form action="{{ url_for('cargar_jpv') }}" method="POST" style="margin:0;">
-            <button type="submit" class="btn btn-orange">
-                <i class="fas fa-file-excel"></i> Cargar JPV Global
-            </button>
-        </form>
-
-        <a href="{{ url_for('index') }}" class="btn btn-outline" style="border: none; color: #666;">
-            <i class="fas fa-arrow-left"></i> Volver
-        </a>
-    </div>
-
-    <div class="main-dashboard">
-        
-        <div class="sidebar-panel">
-            <h3 style="margin-top: 0;">Calendario</h3>
-            <input type="date" value="{{ date_today }}" style="width: 100%; padding: 8px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px;">
-            
-            <hr style="border: 0; border-top: 1px solid #eee;">
-            <h4 style="color: #555;">Resumen del Día</h4>
-            <div style="font-size: 0.9em; color: #666;">
-                <p><strong>☀️ Mañana:</strong> 06:00 - 14:00</p>
-                <p><strong>⛅ Tarde:</strong> 14:00 - 22:00</p>
-                <p><strong>🌙 Noche:</strong> 22:00 - 06:00</p>
-            </div>
-        </div>
-
-        <div class="sellers-area">
-            
-            <div class="shift-block">
-                <div class="shift-header">
-                    <span>☀️ Turno Mañana (06:00 - 14:00)</span>
-                    <span style="font-size: 0.8em; opacity: 0.8; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 4px;">JPV Cargado: ✅</span>
-                </div>
-                
-                <div class="sellers-grid">
-                    <div class="seller-card ok">
-                        <span class="status-badge">Cuadra</span>
-                        <h3>Juan Pérez</h3>
-                        <p>Isla 1 y 2</p>
-                        <small style="color: green; font-weight: bold;">Dif: $0.00</small>
-                    </div>
-
-                    <div class="seller-card error">
-                        <span class="status-badge" style="color: red;">Diferencia</span>
-                        <h3>María Gomez</h3>
-                        <p>Isla 3 y 4</p>
-                        <small style="color: red; font-weight: bold;">Dif: -$1,500.00</small>
-                    </div>
-
-                     <div class="seller-card">
-                        <span class="status-badge">Pendiente</span>
-                        <h3>Carlos Ruiz</h3>
-                        <p>Isla 5 y 6</p>
-                        <small style="color: #999;">Sin datos</small>
-                    </div>
-                </div>
-            </div>
-
-            <div class="shift-block gnc-section">
-                <h3 style="color: var(--secondary); margin-top: 0; font-size: 1.1em;">
-                    <i class="fas fa-gas-pump"></i> Sector GNC
-                </h3>
-                <div class="sellers-grid">
-                    <div class="seller-card">
-                        <h3>Responsable 1</h3>
-                        <p>---</p>
-                    </div>
-                    <div class="seller-card">
-                        <h3>Responsable 2</h3>
-                        <p>---</p>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-
-    <div id="modalCrear" class="modal">
-        <div class="modal-content">
-            <span class="close-modal" onclick="closeModal('modalCrear')">&times;</span>
-            <h2 style="margin-top: 0;">Nuevo Vendedor</h2>
-            <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
-                <i class="fas fa-info-circle"></i> El sistema generará el usuario y contraseña automáticamente.
-            </p>
-            
-            <form action="{{ url_for('crear_vendedor') }}" method="POST">
-                <div class="form-group">
-                    <label>Nombre:</label>
-                    <input type="text" name="nombre" required placeholder="Ej: Juan">
-                </div>
-                <div class="form-group">
-                    <label>Apellido:</label>
-                    <input type="text" name="apellido" required placeholder="Ej: Pérez">
-                </div>
-                <div class="form-group">
-                    <label>Email (será el usuario):</label>
-                    <input type="email" name="email" required placeholder="juan.perez@estacion.com">
-                </div>
-                <button type="submit" class="btn btn-blue" style="width: 100%; justify-content: center; margin-top: 20px;">
-                    Crear Vendedor
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <div id="modalVerUsuarios" class="modal">
-        <div class="modal-content" style="width: 700px;">
-            <span class="close-modal" onclick="closeModal('modalVerUsuarios')">&times;</span>
-            <h2 style="margin-top: 0;">Usuarios Activos</h2>
-            
-            <div style="max-height: 350px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nombre</th>
-                            <th>Usuario/Email</th>
-                            <th>Contraseña</th>
-                            <th>Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if vendedores %}
-                            {% for v in vendedores %}
-                            <tr>
-                                <td>{{ v.nombre }} {{ v.apellido }}</td>
-                                <td>{{ v.email }}</td>
-                                <td style="font-family: monospace; color: #d63384; font-weight: bold; background: #fff0f6; padding: 5px; border-radius: 3px;">
-                                    {{ v.plain_password }}
-                                </td>
-                                <td><span style="color: green; font-weight: bold; font-size: 0.8em; background: #d4edda; padding: 2px 6px; border-radius: 10px;">Activo</span></td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
-                                <td colspan="4" style="text-align:center; padding: 20px; color: #666;">
-                                    No hay vendedores creados todavía.
-                                </td>
-                            </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function openModal(id) {
-            document.getElementById(id).style.display = 'flex';
-        }
-        function closeModal(id) {
-            document.getElementById(id).style.display = 'none';
-        }
-        
-        // Cerrar si clic afuera del contenido del modal
-        window.onclick = function(event) {
-            if (event.target.classList.contains('modal')) {
-                event.target.style.display = "none";
-            }
-        }
-    </script>
-</body>
-</html>
+    <!-- JPV DESACTIVADO HASTA CREAR RUTA -->
+    <button class="btn btn-orange" disabled>
