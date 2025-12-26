@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Administración</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f4f6f8;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 80vh;
+        }
+
+        .dashboard-container {
+            background: white;
+            width: 100%;
+            max-width: 700px;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .modules-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            text-align: left;
+        }
+
+        .dashboard-card {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border: 1px solid #eee;
+            border-left: 5px solid #ccc;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .dashboard-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .card-icon {
+            font-size: 2rem;
+            margin-right: 20px;
+            width: 40px;
+            text-align: center;
+        }
+
+        .card-content h3 {
+            margin: 0 0 5px 0;
+            color: #2c3e50;
+            font-size: 1.1rem;
+        }
+
+        .card-content p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+
+        .card-red { border-left-color: #dc3545; }
+        .card-blue { border-left-color: #007bff; }
+        .card-green { border-left-color: #28a745; }
+        .card-orange { border-left-color: #fd7e14; }
+
+        .volver {
+            margin-top: 30px;
+            display: inline-block;
+            color: #007bff;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .volver:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+<div class="dashboard-container">
+
+    <h1>Administración</h1>
+    <p class="subtitle">Configuración general del sistema</p>
+
+    <div class="modules-grid">
+
+        <a href="#" class="dashboard-card card-blue">
+            <div class="card-icon">👥</div>
+            <div class="card-content">
+                <h3>Usuarios</h3>
+                <p>Crear, editar y desactivar estaciones.</p>
+            </div>
+        </a>
+
+        <a href="#" class="dashboard-card card-green">
+            <div class="card-icon">⛽</div>
+            <div class="card-content">
+                <h3>Parámetros de Estación</h3>
+                <p>Combustibles, surtidores y reglas.</p>
+            </div>
+        </a>
+
+        <a href="#" class="dashboard-card card-orange">
+            <div class="card-icon">🤖</div>
+            <div class="card-content">
+                <h3>Automatizaciones</h3>
+                <p>Integraciones, agentes y tareas.</p>
+            </div>
+        </a>
+
+        <a href="#" class="dashboard-card card-red">
+            <div class="card-icon">🗑️</div>
+            <div class="card-content">
+                <h3>Mantenimiento</h3>
+                <p>Limpieza de datos y diagnósticos.</p>
+            </div>
+        </a>
+
+    </div>
+
+    <a href="{{ url_for('panel_estacion') }}" class="volver">⬅ Volver al panel</a>
+
+</div>
+</body>
+</html>

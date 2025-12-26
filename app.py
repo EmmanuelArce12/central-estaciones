@@ -10,6 +10,7 @@ import io
 import traceback # Nuevo para ver errores reales
 import re
 import gc
+from flask import abort
 from collections import Counter
 from sqlalchemy import func
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
@@ -283,6 +284,14 @@ def load_user(uid): return User.query.get(int(uid))
 # ==========================================
 # 🌐 RUTAS WEB
 # ==========================================
+@app.route('/admin/gestion-estacion')
+@login_required
+def admin_gestion_estacion():
+    if not current_user.is_superadmin:
+        return redirect(url_for('panel_estacion'))
+
+    return render_template('admin_gestion_estacion.html', user=current_user)
+
 
 @app.route('/')
 def root():

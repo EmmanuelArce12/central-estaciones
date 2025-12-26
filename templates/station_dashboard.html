@@ -56,14 +56,23 @@
             width: 40px; 
             text-align: center; 
         }
-        .card-content h3 { margin: 0 0 5px 0; color: #2c3e50; font-size: 1.1rem; }
-        .card-content p { margin: 0; font-size: 0.9rem; color: #7f8c8d; }
+        .card-content h3 { 
+            margin: 0 0 5px 0; 
+            color: #2c3e50; 
+            font-size: 1.1rem; 
+        }
+        .card-content p { 
+            margin: 0; 
+            font-size: 0.9rem; 
+            color: #7f8c8d; 
+        }
         
-        /* COLORES DE LAS TARJETAS */
+        /* COLORES */
         .card-cyan { border-left-color: #17a2b8; } 
         .card-purple { border-left-color: #8e44ad; } 
         .card-blue { border-left-color: #007bff; }
         .card-green { border-left-color: #28a745; }
+        .card-orange { border-left-color: #fd7e14; }
         
         .logout { 
             margin-top: 30px; 
@@ -76,6 +85,7 @@
         .logout:hover { text-decoration: underline; }
     </style>
 </head>
+
 <body>
     <div class="dashboard-container">
         <h1>Hola, {{ user.username }}</h1>
@@ -114,6 +124,17 @@
                     <p>Visualizar estadísticas y métricas.</p>
                 </div>
             </a>
+
+            <!-- BOTÓN ADMINISTRACIÓN -->
+            {% if user.is_superadmin %}
+            <a href="{{ url_for('admin_gestion_estacion') }}" class="dashboard-card card-orange">
+                <div class="card-icon">⚙️</div>
+                <div class="card-content">
+                    <h3>Administración</h3>
+                    <p>Configuración general del sistema</p>
+                </div>
+            </a>
+            {% endif %}
 
         </div>
 
