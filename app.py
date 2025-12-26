@@ -168,6 +168,7 @@ def procesar_info_desde_id(id_vox, texto_original=""):
 
 # --- MODELO DE USUARIO (Actualizado) ---
 class User(UserMixin, db.Model):
+    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False) # El email será el username
     email = db.Column(db.String(150), unique=True, nullable=False)
@@ -292,41 +293,77 @@ def load_user(uid): return User.query.get(int(uid))
 import string # Asegurate de importar esto arriba
 
 # --- RUTAS DE GESTIÓN DE VENDEDORES ---
+# --- RUTA PARA MOSTRAR EL PANEL ---
+@app.route('/admin_gestion_estacion')
+@login_required
+def admin_gestion_estacion():
+    # Seguridad: Solo admin, superadmin o estacion pueden entrar
+    if current_user.role not in ['admin', 'superadmin', 'estacion']:
+        flash('Acceso denegado.', 'error')
+        return redirect(url_for('index'))
 
+    # FILTRO INTELIGENTE:
+    # Si soy Admin/Superadmin -> Veo a TODOS los vendedores
+    # Si soy Estación -> Veo a MIS vendedores (podrías filtrar por ID de estación si tuvieras esa relación, 
+    # pero por ahora mostramos todos los que tengan rol 'vendedor')
+    
+    vendedores = User.query.filter_by(role='vendedor').all()
+    
+    # Fecha para el calendario
+    date_today = datetime.now().strftime('%Y-%m-%d')
+    
+    return render_template('admin_gestion_estacion.html', 
+                           vendedores=vendedores, 
+                           date_today=date_today)
+
+# --- RUTA PARA CREAR EL VENDEDOR (DENTRO DE LA MISMA TABLA) ---
 @app.route('/crear_vendedor', methods=['POST'])
 @login_required
 def crear_vendedor():
-    if current_user.role != 'admin' and not current_user.is_superadmin:
-        return jsonify({'error': 'No autorizado'}), 403
-
-    data = request.form
-    nombre = data.get('nombre')
-    apellido = data.get('apellido')
-    email = data.get('email')
-
-    if User.query.filter_by(email=email).first():
-        flash('El email ya está registrado', 'error')
+    # Verificamos permisos de nuevo
+    if current_user.role not in ['admin', 'superadmin', 'estacion']:
+        flash('No tienes permiso para crear vendedores.', 'error')
         return redirect(url_for('admin_gestion_estacion'))
 
-    # Generar contraseña aleatoria de 6 caracteres
-    chars = string.ascii_letters + string.digits
-    password = ''.join(random.choice(chars) for i in range(6))
+    nombre = request.form.get('nombre')
+    apellido = request.form.get('apellido')
+    email = request.form.get('email')
 
-    nuevo_vendedor = User(
-        username=email,
-        email=email,
-        nombre=nombre,
-        apellido=apellido,
-        role='vendedor',
-        station_owner_id=current_user.id  # Lo vinculamos al admin actual
-    )
-    nuevo_vendedor.set_password(password)
+    # Validación básica
+    usuario_existente = User.query.filter_by(email=email).first()
+    if usuario_existente:
+        flash('Ese email ya está registrado.', 'error')
+        return redirect(url_for('admin_gestion_estacion'))
 
-    db.session.add(nuevo_vendedor)
-    db.session.commit()
+    # Generamos contraseña automática
+    import secrets
+    import string
+    alphabet = string.ascii_letters + string.digits
+    password_plana = ''.join(secrets.choice(alphabet) for i in range(8)) # Ej: aB3x9Z1w
 
-    flash(f'Vendedor creado: {nombre} {apellido}. Contraseña: {password}', 'success')
+    try:
+        # AQUÍ ESTÁ LA MAGIA: Creamos un User común, pero le ponemos el rol 'vendedor'
+        nuevo_vendedor = User(
+            email=email,
+            username=email, # Usamos el email como username
+            nombre=nombre,
+            apellido=apellido,
+            plain_password=password_plana,  # Guardamos la visible para verla en el panel
+            role='vendedor'  # <--- ESTO LO DIFERENCIA
+        )
+        nuevo_vendedor.set_password(password_plana) # Encriptamos también
+
+        db.session.add(nuevo_vendedor)
+        db.session.commit()
+
+        flash(f'Vendedor {nombre} creado con éxito. Clave: {password_plana}', 'success')
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al crear vendedor: {str(e)}', 'error')
+
     return redirect(url_for('admin_gestion_estacion'))
+
 
 @app.route('/cargar_jpv', methods=['POST'])
 @login_required
@@ -335,24 +372,7 @@ def cargar_jpv():
     flash('Funcionalidad de Carga JPV en desarrollo', 'info')
     return redirect(url_for('admin_gestion_estacion'))
 
-@app.route('/admin_gestion_estacion')
-@login_required
-def admin_gestion_estacion():
-    # 1. Seguridad
-    if not current_user.is_superadmin and current_user.role != 'admin':
-        return redirect(url_for('index'))
-    
-    # 2. Buscar vendedores
-    vendedores = User.query.filter_by(station_owner_id=current_user.id).all()
-    
-    # 3. Obtener fecha de hoy para el calendario
-    hoy = datetime.now().strftime('%Y-%m-%d')
-    
-    # 4. Enviar todo al HTML (agregamos date_today=hoy)
-    return render_template('admin_gestion_estacion.html', 
-                           user=current_user, 
-                           vendedores=vendedores, 
-                           date_today=hoy)
+
 @app.route('/')
 def root():
     if current_user.is_authenticated:
