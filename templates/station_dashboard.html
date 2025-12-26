@@ -129,7 +129,7 @@
                 ES SUPERADMIN: [{{ user.is_superadmin }}]
             </p>
                      <!-- BOTÓN ADMINISTRACIÓN -->
-            {% if user.is_superadmin or user.role == 'admin' %}
+            {% if user.is_superadmin or user.role == 'estacion' %}
             <a href="{{ url_for('admin_gestion_estacion') }}" class="dashboard-card card-orange">
                 <div class="card-icon">⚙️</div>
                 <div class="card-content">
