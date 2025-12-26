@@ -180,7 +180,8 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=True)
     username = db.Column(db.String(120), unique=True, nullable=False) # A veces se usa igual que el email
-    password_hash = db.Column(db.String(128))
+    password_hash = db.Column(db.Text, nullable=False)
+
     
     # Columnas nuevas (tienen que estar aquí para que el login no explote)
     nombre = db.Column(db.String(100))
@@ -312,24 +313,28 @@ import string # Asegurate de importar esto arriba
 @app.route('/admin_gestion_estacion')
 @login_required
 def admin_gestion_estacion():
-    # Seguridad: Solo admin, superadmin o estacion pueden entrar
-    if current_user.role not in ['admin', 'superadmin', 'estacion']:
-        flash('Acceso denegado.', 'error')
-        return redirect(url_for('index'))
+    role = current_user.role or 'estacion'
 
-    # FILTRO INTELIGENTE:
-    # Si soy Admin/Superadmin -> Veo a TODOS los vendedores
-    # Si soy Estación -> Veo a MIS vendedores (podrías filtrar por ID de estación si tuvieras esa relación, 
-    # pero por ahora mostramos todos los que tengan rol 'vendedor')
-    
+    if role not in ['admin', 'superadmin', 'estacion']:
+        flash('Acceso denegado.', 'error')
+        return redirect(url_for('root'))
+
     vendedores = User.query.filter_by(role='vendedor').all()
-    
-    # Fecha para el calendario
+
+    for v in vendedores:
+        v.nombre = v.nombre or ""
+        v.apellido = v.apellido or ""
+        v.email = v.email or ""
+        v.plain_password = v.plain_password or ""
+
     date_today = datetime.now().strftime('%Y-%m-%d')
-    
-    return render_template('admin_gestion_estacion.html', 
-                           vendedores=vendedores, 
-                           date_today=date_today)
+
+    return render_template(
+        'admin_gestion_estacion.html',
+        vendedores=vendedores,
+        date_today=date_today
+    )
+
 
 # --- RUTA PARA CREAR EL VENDEDOR (DENTRO DE LA MISMA TABLA) ---
 @app.route('/crear_vendedor', methods=['POST'])
