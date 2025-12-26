@@ -287,11 +287,10 @@ def load_user(uid): return User.query.get(int(uid))
 @app.route('/admin/gestion-estacion')
 @login_required
 def admin_gestion_estacion():
-    if not current_user.is_superadmin:
+    # Aceptamos superadmin O admin
+    if not current_user.is_superadmin and current_user.role != 'admin':
         return redirect(url_for('panel_estacion'))
-
     return render_template('admin_gestion_estacion.html', user=current_user)
-
 
 @app.route('/')
 def root():
